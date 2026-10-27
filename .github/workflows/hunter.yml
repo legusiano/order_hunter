@@ -1,0 +1,36 @@
+name: Охотник за заказами
+
+on:
+  schedule:
+    - cron: "10,40 * * * *"  # каждые полчаса; присылает в Telegram новые заказы на ботов, мини-аппы и ИИ-ассистентов
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
+      # что уже присылали: берём последнее сохранённое состояние и сохраняем новое под новым ключом
+      - uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: hunter-state-${{ github.run_id }}
+          restore-keys: hunter-state-
+      - run: python hunter.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state.json
+          key: hunter-state-${{ github.run_id }}
