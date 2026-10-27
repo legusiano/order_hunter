@@ -1,18 +1,21 @@
 from hunter import format_lead, matches
 
 
-def test_matches_bot_orders():
+def test_matches_telegram_bots():
     assert matches("Разработка бота для Телеграм", "")
-    assert matches("Нужен ИИ-ассистент для салона", "")
+    assert matches("Нужен телеграм-бот для записи", "")
+    assert matches("TG bot для магазина", "")
+    assert matches("Чат бот", "нужен бот в тг, который принимает заявки")
     assert matches("Мини-приложение в Telegram", "")
-    assert matches("Сайт", "нужно подключить API нейросети GPT к форме")
 
 
-def test_skips_noise():
+def test_skips_not_telegram():
     assert not matches("Разработка 3d модели", "пишите в телеграм")
-    assert not matches("Логотип", "можно через нейросеть")
-    assert not matches("Бот-разработчик", "работа в штат, полный рабочий день")
-    assert not matches("Косметолог", "ботокс")
+    assert not matches("Нужен бот для автоматизированной работы Black Russia", "")
+    assert not matches("Скрипт на n8n", "ChatGPT пишет посты")
+    assert not matches("Голосовой бот на сайт", "звоните. Мой телеграм @me")
+    assert not matches("Бот-разработчик для телеграм", "работа в штат, полный рабочий день")
+    assert not matches("Косметолог", "ботокс, запись в телеграм")
 
 
 def test_format_lead():
