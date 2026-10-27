@@ -1,0 +1,24 @@
+name: Сводка по звёздам
+
+on:
+  schedule:
+    - cron: "3 16 * * 0"  # воскресенье 19:03 МСК
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install httpx python-dotenv
+      - run: python stars_report.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
