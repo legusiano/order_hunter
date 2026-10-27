@@ -19,6 +19,6 @@ def test_skips_not_telegram():
 
 
 def test_format_lead():
-    lead = {"source": "Kwork", "title": "Чат бот", "body": "Чат бот для записи", "price": "до 500 ₽",
-            "url": "https://kwork.ru/projects/1"}
-    assert format_lead(lead) == "🎯 Kwork: Чат бот (до 500 ₽)\nдля записи\nhttps://kwork.ru/projects/1"
+    lead = {"source": "@devjobs", "title": "Чат бот", "body": "Чат бот для записи", "price": "до 500 ₽",
+            "url": "https://t.me/devjobs/1"}
+    assert format_lead(lead) == "🎯 @devjobs: Чат бот (до 500 ₽)\nдля записи\nhttps://t.me/devjobs/1"

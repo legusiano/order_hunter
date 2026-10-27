@@ -1,10 +1,7 @@
 """Охотник за заказами: каждые 30 минут (GitHub Actions, .github/workflows/hunter.yml) смотрит открытые ленты заказов
 и присылает владельцу в Telegram свежие заявки на Telegram-ботов и мини-аппы. Без входа в Telegram и без ИИ.
 
-Откуда берёт:
-- FL.ru — RSS всех проектов;
-- Kwork — биржа проектов (список зашит в страницу как JSON);
-- открытые ТГ-каналы с заказами — через веб-превью t.me/s/<канал>.
+Откуда берёт: только открытые ТГ-каналы с заказами — через веб-превью t.me/s/<канал> (биржи Кириллу неудобны).
 Что уже присылал — state.json (между запусками хранится в кэше GitHub Actions), чтобы не повторяться. Первый запуск присылает только несколько последних.
 """
 
@@ -14,7 +11,6 @@ import json
 import os
 import re
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import httpx
@@ -24,8 +20,9 @@ load_dotenv(Path(__file__).parent / ".env")
 STATE = Path(__file__).parent / "state.json"
 
 OWNER_CHAT = int(os.getenv("OWNER_CHAT_ID", "2093180872"))
-CHANNELS = ["freelancetaverna", "workk_on"]
-KWORK_CATEGORIES = [11, 41]
+# открытые каналы с заказами, где есть свежие посты (проверено 27.10.2026)
+CHANNELS = ["freelancetaverna", "workk_on", "FrWork3", "FreeWorkFeed", "allgigs", "devjobs", "frilancekomfort",
+            "job_python", "vakansii_it", "work_finde", "normrabota", "remote_w0rk", "dddwork", "digitaltender"]
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"}
 MAX_PER_RUN = 10
 FIRST_RUN = 5
@@ -52,32 +49,6 @@ def matches(title: str, body: str) -> bool:
     return bool(KEYWORDS.search(text)) and not EXCLUDE.search(text)
 
 
-async def fetch_fl(http: httpx.AsyncClient) -> list[dict]:
-    r = await http.get("https://www.fl.ru/rss/all.xml")
-    root = ET.fromstring(r.content)  # кодировка (windows-1251) берётся из заголовка XML
-    leads = []
-    for item in root.iter("item"):
-        link = item.findtext("link", "")
-        leads.append({"id": "fl:" + link, "source": "FL.ru", "title": clean(item.findtext("title")),
-                      "body": clean(item.findtext("description")), "price": "", "url": link})
-    return leads
-
-
-async def fetch_kwork(http: httpx.AsyncClient, category: int) -> list[dict]:
-    r = await http.get(f"https://kwork.ru/projects?c={category}")
-    start = r.text.find('"wants":[')
-    if start < 0:
-        raise ValueError("не нашёл список проектов на странице")
-    wants, _ = json.JSONDecoder().raw_decode(r.text, start + len('"wants":'))
-    leads = []
-    for w in wants:
-        price = w.get("priceLimit") or ""
-        leads.append({"id": f"kwork:{w['id']}", "source": "Kwork", "title": clean(w.get("name")),
-                      "body": clean(w.get("description")), "price": f"до {float(price):.0f} ₽" if price else "",
-                      "url": f"https://kwork.ru/projects/{w['id']}"})
-    return leads
-
-
 async def fetch_channel(http: httpx.AsyncClient, channel: str) -> list[dict]:
     r = await http.get(f"https://t.me/s/{channel}")
     leads = []
@@ -91,9 +62,7 @@ async def fetch_channel(http: httpx.AsyncClient, channel: str) -> list[dict]:
 async def collect() -> tuple[list[dict], list[str]]:
     leads, errors = [], []
     async with httpx.AsyncClient(timeout=30, headers=UA, follow_redirects=True) as http:
-        jobs = [("FL.ru", fetch_fl(http))]
-        jobs += [(f"Kwork c={c}", fetch_kwork(http, c)) for c in KWORK_CATEGORIES]
-        jobs += [("@" + c, fetch_channel(http, c)) for c in CHANNELS]
+        jobs = [("@" + c, fetch_channel(http, c)) for c in CHANNELS]
         for (name, _), res in zip(jobs, await asyncio.gather(*(j for _, j in jobs), return_exceptions=True)):
             if isinstance(res, Exception):
                 errors.append(f"{name}: {res!r}"[:200])
