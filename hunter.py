@@ -30,12 +30,16 @@ FIRST_RUN = 5
 # только Telegram-боты: «бот» и «телеграм» рядом, в одной фразе («телеграм» сам по себе не годится — он в контактах
 # почти везде, а «бот» без телеграма — это и боты для игр, и чат-боты на сайт)
 TG = r"(телеграм|телеграмм|telegram|\bтг\b|\btg\b)"
-KEYWORDS = re.compile(
-    rf"{TG}[^.!?\n]{{0,30}}(\bбот|\bbot|mini ?app|мини.?апп|мини.?прилож|webapp)|"
-    rf"(\bбот|\bbot|mini ?app|мини.?апп|мини.?прилож|webapp)[^.!?\n]{{0,30}}{TG}",
-    re.I)
+# что делаем: ботов, ИИ-ассистентов на их основе и мини-аппы
+WHAT = r"(\bбот|\bbot|mini ?app|мини.?апп|мини.?прилож|webapp|ассистент|assistant|ии.?агент|ai.?agent)"
+KEYWORDS = re.compile(rf"{TG}[^.!?\n]{{0,30}}{WHAT}|{WHAT}[^.!?\n]{{0,30}}{TG}", re.I)
+# а здесь «ассистент» — это человек, а не бот
+HUMAN = re.compile(r"(личн|бизнес|виртуальн|онлайн|удал[её]нн)\S*.?ассистент|ассистент.?(руководител|директор)", re.I)
 # а это не про нас: вакансии в штат и чужие боты, которые надо просто «продвинуть»
-EXCLUDE = re.compile(r"в штат|полный рабочий день|full.?time|ботокс|робот.?пылесос|накрут", re.I)
+EXCLUDE = re.compile(r"в штат|полный рабочий день|full.?time|ботокс|робот.?пылесос|накрут|"
+                     r"обязанност|будет плюсом|оклад|зарплат|\bз/п\b|#вакансия|#(junior|middle|senior)\b", re.I)
+# заказ не на разработку: в заголовке другая профессия
+ROLE = re.compile(r"копирайтер|сценарист|дизайнер|маркетолог|\bsmm|менеджер|монтаж|рилс|таргет|ассистент руковод", re.I)
 
 
 def clean(text: str) -> str:
@@ -46,7 +50,10 @@ def clean(text: str) -> str:
 
 def matches(title: str, body: str) -> bool:
     text = f"{title}\n{body}"
-    return bool(KEYWORDS.search(text)) and not EXCLUDE.search(text)
+    if not KEYWORDS.search(text) or EXCLUDE.search(text) or ROLE.search(title):
+        return False
+    # вакансия «личный ассистент, связь в телеграм» — не наше, если про бота там ни слова
+    return not HUMAN.search(text) or bool(re.search(r"\bбот|\bbot|mini ?app|мини.?апп", text, re.I))
 
 
 async def fetch_channel(http: httpx.AsyncClient, channel: str) -> list[dict]:

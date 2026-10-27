@@ -7,6 +7,7 @@ def test_matches_telegram_bots():
     assert matches("TG bot для магазина", "")
     assert matches("Чат бот", "нужен бот в тг, который принимает заявки")
     assert matches("Мини-приложение в Telegram", "")
+    assert matches("ИИ-ассистент в телеграм для салона", "отвечает клиентам и записывает")
 
 
 def test_skips_not_telegram():
@@ -16,6 +17,9 @@ def test_skips_not_telegram():
     assert not matches("Голосовой бот на сайт", "звоните. Мой телеграм @me")
     assert not matches("Бот-разработчик для телеграм", "работа в штат, полный рабочий день")
     assert not matches("Косметолог", "ботокс, запись в телеграм")
+    assert not matches("Личный ассистент руководителя", "резюме присылайте в телеграм")
+    assert not matches("Python-разработчик", "Обязанности: разработка Telegram-ботов. Оклад 150к")
+    assert not matches("Копирайтер-сценарист", "улучшать сообщения в Telegram-боте")
 
 
 def test_format_lead():
