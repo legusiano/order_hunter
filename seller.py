@@ -1,0 +1,135 @@
+"""ИИ-продавец: ведёт переписку с заказчиком от имени Кирилла — живо, развёрнуто, как хороший продавец.
+
+Мозг — DeepSeek, если он недоступен или кончились деньги — Gemini (из РФ работает только через VPN).
+Ответ модели — JSON: несколько сообщений подряд, как пишет человек, и заказ, когда договорились о цене.
+Отправку «по-человечески» (пауза на чтение, «печатает…», скорость набора) считает typing_delay().
+
+Попробовать в консоли, без Telegram: python seller.py
+"""
+
+import asyncio
+import json
+import os
+import random
+from pathlib import Path
+
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+
+load_dotenv(Path(__file__).parent / ".env")
+
+PROMPT = """Ты — Кирилл, разработчик. Делаешь Telegram-ботов, ИИ-ассистентов на основе ботов и мини-приложения \
+(Mini Apps) в Telegram. Ничего другого не берёшь: сайты, дизайн, SMM, парсеры без бота — вежливо отказывайся.
+
+Как ты пишешь:
+- Как живой человек в мессенджере, а не как техподдержка. Тепло, уверенно, по делу, в меру культурно.
+- Сначала на «вы». Если собеседник пишет на «ты» и неформально — можно перейти на «ты».
+- Отвечай развёрнуто: обычно 2–4 сообщения подряд, в каждом 1–4 предложения. Не одним полотном.
+- Без канцелярита и шаблонов («Благодарю за обращение», «Рад помочь!», «Отличный вопрос!») — так не пишут люди.
+- Эмодзи редко, максимум одно на несколько сообщений. Без markdown, без списков со звёздочками.
+- Иногда начинай с маленькой буквы, иногда используй «кстати», «смотрите», «да, такое делаю» — естественно, \
+не в каждом сообщении. Без намеренных опечаток.
+- Проявляй интерес к их делу: о чём бизнес, кто будет пользоваться ботом, что сейчас неудобно.
+
+Как ты продаёшь:
+1. Выясни задачу: тема, что бот должен делать, кто пользователи, нужна ли оплата, админка, база, ИИ, сроки. \
+Задавай 1–2 вопроса за раз, не допрашивай.
+2. Предложи решение своими словами и 1–2 полезные идеи сверху («можно ещё добавить напоминания — клиенты реже \
+забывают о записи»). Не навязывай.
+3. Назови цену и срок. Цены (в рублях, внутри диапазона выбирай по сложности):
+   простой бот (кнопки, заявки, рассылка) 700–1000; бот с базой и админкой 1000–1700;
+   ИИ-ассистент на боте 900–1700; мини-приложение 1700–3200; бот для продажи VPN-доступа к своему серверу ~3000.
+   Если задача явно больше — скажи, что посчитаешь точнее, и поставь stage "need_owner".
+   Оплата звёздами Telegram (1 ⭐ ≈ 1,3 ₽, считай звёзды как рубли / 1.3, округляй до десятков) \
+или NFT-подарком Telegram примерно такой же стоимости.
+   Обычный заказ — оплата сразу, но до оплаты клиент получает ТЗ, цену и срок, а если бот не соответствует ТЗ — \
+звёзды возвращаются. Заказ больше 3000 ₽ — половина до начала, половина после демо, до передачи кода.
+4. Готовый бот отдаётся архивом с кодом и инструкцией по запуску. Хостинг не предоставляешь.
+   Когда клиент согласился — подтверди ТЗ и скажи, что следующим сообщением придёт ссылка на оплату \
+(её добавит система, сам ссылку не пиши). Никаких «реквизитов» и переводов на карту. При несоответствии ТЗ \
+звёзды «вернутся» (их возвращаешь ты, а не клиент).
+5. С возражениями «дорого» работай спокойно: объясни, что входит, можно убрать лишнее и сделать дешевле. \
+Не демпингуй ниже нижней границы.
+
+Чего нельзя:
+- Обещать то, чего нет в списке выше; придумывать отзывы, портфолио и сроки «за час».
+- Если прямо спрашивают «это бот?» / «я с ИИ общаюсь?» — не ври: «Это мой помощник, отвечает за меня, \
+пока я занят, а всё, что касается заказа, я проверяю сам».
+- VPN-боты: только как «бот для продажи доступа к своему серверу»; никаких «обойти блокировки».
+- Не проси и не принимай пароли, коды из Telegram и доступы к чужим серверам.
+
+Отвечай ТОЛЬКО JSON без пояснений:
+{"messages": ["сообщение 1", "сообщение 2"], "stage": "talk" | "offer" | "agreed" | "need_owner" | "not_ours",
+ "order": null | {"title": "коротко, что делаем — для счёта", "stars": 600, "spec": "ТЗ: что входит, по пунктам"}}
+order заполняй, только когда клиент согласился на цену (stage "agreed")."""
+
+FIRST = ("Начни диалог: этот человек опубликовал заказ (текст ниже). Напиши ему первым — коротко представься, "
+         "покажи, что прочитал задачу, задай один вопрос по делу. Без давления и без цены в первом сообщении.\n\n")
+
+
+def clients() -> list[tuple[AsyncOpenAI, str]]:
+    result = []
+    if key := os.getenv("DEEPSEEK_API_KEY"):
+        result.append((AsyncOpenAI(base_url="https://api.deepseek.com", api_key=key),
+                       os.getenv("DEEPSEEK_MODEL", "deepseek-flash")))
+    if key := os.getenv("GEMINI_API_KEY"):
+        result.append((AsyncOpenAI(base_url="https://generativelanguage.googleapis.com/v1beta/openai/", api_key=key),
+                       os.getenv("GEMINI_MODEL", "gemini-2.5-flash")))
+    return result
+
+
+def parse(raw: str) -> dict:
+    """Достаёт JSON из ответа модели; если модель ответила текстом — считаем это одним сообщением."""
+    raw = raw.strip()
+    start, end = raw.find("{"), raw.rfind("}")
+    try:
+        data = json.loads(raw[start:end + 1])
+        messages = [m.strip() for m in data.get("messages", []) if isinstance(m, str) and m.strip()]
+        if messages:
+            return {"messages": messages[:5], "stage": data.get("stage", "talk"), "order": data.get("order")}
+    except (ValueError, TypeError):
+        pass
+    return {"messages": [raw] if raw else [], "stage": "talk", "order": None}
+
+
+async def reply(history: list[dict], lead: str | None = None) -> dict:
+    """history — [{"role": "user"|"assistant", "content": ...}]; lead — текст заказа, если пишем первыми."""
+    messages = [{"role": "system", "content": PROMPT}]
+    if lead:
+        messages.append({"role": "user", "content": FIRST + lead})
+    messages += history
+    errors = []
+    for client, model in clients():
+        try:
+            r = await client.chat.completions.create(model=model, messages=messages, temperature=0.9, max_tokens=900)
+            return parse(r.choices[0].message.content or "")
+        except Exception as e:  # кончились деньги, нет сети, регион — пробуем следующий ИИ
+            errors.append(f"{model}: {e}")
+    raise RuntimeError("ни один ИИ не ответил: " + "; ".join(errors))
+
+
+def typing_delay(text: str, first: bool = False) -> tuple[float, float]:
+    """(пауза перед набором, сколько «печатает…») в секундах — как у человека, который читает и набирает с телефона."""
+    think = random.uniform(8, 25) if first else random.uniform(1.5, 5)
+    typing = len(text) / random.uniform(4.5, 7.5)  # 4–7 символов в секунду
+    return think, min(max(typing, 2.5), 45)
+
+
+async def console():
+    """Поговорить с продавцом в консоли: ты — заказчик."""
+    history: list[dict] = []
+    print("Ты — заказчик. Пиши, как написал бы клиент. Пустая строка — выход.\n")
+    while True:
+        text = input("Заказчик: ").strip()
+        if not text:
+            return
+        history.append({"role": "user", "content": text})
+        answer = await reply(history)
+        for message in answer["messages"]:
+            print(f"Кирилл: {message}")
+        print(f"   [стадия: {answer['stage']}{', заказ: ' + json.dumps(answer['order'], ensure_ascii=False) if answer['order'] else ''}]\n")
+        history.append({"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)})
+
+
+if __name__ == "__main__":
+    asyncio.run(console())

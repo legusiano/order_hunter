@@ -2,3 +2,4 @@ httpx
 python-dotenv
 pytest
 telethon
+python-telegram-bot>=22,<23
