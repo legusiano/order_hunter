@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sys
+from urllib.parse import quote
 from pathlib import Path
 
 import httpx
@@ -89,11 +90,55 @@ def format_lead(lead: dict) -> str:
     return f"{head}\n{body[:600]}{'…' if len(body) > 600 else ''}\n{lead['url']}"
 
 
-async def send(text: str):
+# @username заказчика в тексте поста или ссылка t.me/username (не служебные и не сам канал)
+CONTACT = re.compile(r"(?:@|t\.me/)([A-Za-z][A-Za-z0-9_]{4,31})\b")
+NOT_CONTACT = re.compile(r"bot$|^(joinchat|share|addlist|proxy|iv|s)$", re.I)
+
+
+def contact(lead: dict) -> str | None:
+    channel = lead["source"].lstrip("@").lower()
+    for name in CONTACT.findall(lead["body"]):
+        if name.lower() != channel and not NOT_CONTACT.search(name):
+            return name
+    return None
+
+
+async def draft(lead: dict) -> str | None:
+    """Первое сообщение заказчику от ИИ-продавца — одним текстом, чтобы вставить его в чат."""
+    if not (os.getenv("DEEPSEEK_API_KEY") or os.getenv("GEMINI_API_KEY")):
+        return None
+    import seller  # только когда есть ключ ИИ: без него охотник работает как раньше
+    try:
+        answer = await seller.reply([], lead=f"{lead['title']}\n{lead['body']}")
+    except RuntimeError as e:
+        print("черновик не получился:", e)
+        return None
+    return "\n\n".join(answer["messages"])[:1500] or None
+
+
+def write_button(username: str, text: str) -> dict:
+    # t.me/<username>?text=… открывает чат с заказчиком, где сообщение уже вписано — остаётся нажать «Отправить»
+    return {"inline_keyboard": [[{"text": f"✍️ Написать @{username}",
+                                  "url": f"https://t.me/{username}?text={quote(text)}"}]]}
+
+
+async def send(text: str, markup: dict | None = None):
     token = os.environ["TELEGRAM_TOKEN"]
+    payload = {"chat_id": OWNER_CHAT, "text": text[:4000], "disable_web_page_preview": True}
+    if markup:
+        payload["reply_markup"] = markup
     async with httpx.AsyncClient(timeout=30) as http:
-        await http.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                        json={"chat_id": OWNER_CHAT, "text": text[:4000], "disable_web_page_preview": True})
+        await http.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+
+
+async def send_lead(lead: dict):
+    username = contact(lead)
+    draft_text = await draft(lead) if username else None
+    text = format_lead(lead)
+    if draft_text:
+        await send(f"{text}\n\n✍️ Черновик для @{username}:\n{draft_text}", write_button(username, draft_text))
+    else:
+        await send(text + (f"\n\nКонтакт: @{username}" if username else ""))
 
 
 async def main(dry: bool = False) -> int:
@@ -109,7 +154,7 @@ async def main(dry: bool = False) -> int:
     fresh = [lead for lead in leads if lead["id"] not in seen]
     limit = FIRST_RUN if first_run else MAX_PER_RUN
     for lead in fresh[:limit]:
-        await send(format_lead(lead))
+        await send_lead(lead)
     if len(fresh) > limit:
         await send(f"…и ещё {len(fresh) - limit} похожих заказов, показал самые первые.")
     # помним последние ~2000, чтобы состояние не росло бесконечно

@@ -29,8 +29,15 @@ jobs:
       - run: python hunter.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}  # для черновика первого сообщения; без него — просто контакт
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: state.json
           key: hunter-state-${{ github.run_id }}
+      - name: Сообщить, если охотник упал
+        if: failure()
+        run: >
+          curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
+          -d chat_id=2093180872
+          --data-urlencode "text=⚠️ Охотник за заказами упал: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"

@@ -26,3 +26,16 @@ def test_format_lead():
     lead = {"source": "@devjobs", "title": "Чат бот", "body": "Чат бот для записи", "price": "до 500 ₽",
             "url": "https://t.me/devjobs/1"}
     assert format_lead(lead) == "🎯 @devjobs: Чат бот (до 500 ₽)\nдля записи\nhttps://t.me/devjobs/1"
+
+
+def test_contact_from_post():
+    from hunter import contact
+    lead = {"source": "@digitaltender", "body": "Нужен бот. Канал @digitaltender, пишите @ivan_petrov или t.me/other"}
+    assert contact(lead) == "ivan_petrov"
+    assert contact({"source": "@x", "body": "через @SomeHelperBot и t.me/joinchat"}) is None
+
+
+def test_write_button_prefills_text():
+    from hunter import write_button
+    url = write_button("ivan", "Привет! Делаю ботов")["inline_keyboard"][0][0]["url"]
+    assert url.startswith("https://t.me/ivan?text=") and " " not in url
