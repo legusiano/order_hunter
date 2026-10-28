@@ -25,6 +25,7 @@ from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, Con
 
 import assist
 import hunter
+import sales
 import workshop
 from orders import Dialogs, Orders, pay_link
 
@@ -44,8 +45,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     orders: Orders = ctx.bot_data["orders"]
     arg = ctx.args[0] if ctx.args else ""
     if not arg.startswith("order_") or not arg[6:].isdigit():
-        await update.message.reply_text("Привет! Здесь оплачивают заказы на ботов. Ссылку на оплату пришлёт "
-                                        "исполнитель после того, как вы обсудите задачу.")
+        await sales.greet(update, ctx)  # пришёл сам — знакомится продавец
         return
     order = orders.get(int(arg[6:]))
     if problem := orders.can_pay(int(arg[6:]), order["stars"] if order else 0, update.effective_user.id):

@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import random
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -96,7 +97,9 @@ def parse(raw: str) -> dict:
     start, end = raw.find("{"), raw.rfind("}")
     try:
         data = json.loads(raw[start:end + 1])
-        messages = [m.strip() for m in data.get("messages", []) if isinstance(m, str) and m.strip()]
+        # модель упорно пишет «звёзды вернёте», хотя возвращаем мы
+        messages = [re.sub(r"звёзды вернёте", "звёзды вернутся", m.strip()) for m in data.get("messages", [])
+                    if isinstance(m, str) and m.strip()]
         if messages:
             return {"messages": messages[:5], "stage": data.get("stage", "talk"), "order": data.get("order")}
     except (ValueError, TypeError):
@@ -104,9 +107,10 @@ def parse(raw: str) -> dict:
     return {"messages": [raw] if raw else [], "stage": "talk", "order": None}
 
 
-async def reply(history: list[dict], lead: str | None = None) -> dict:
-    """history — [{"role": "user"|"assistant", "content": ...}]; lead — текст заказа, если пишем первыми."""
-    messages = [{"role": "system", "content": PROMPT}]
+async def reply(history: list[dict], lead: str | None = None, context: str = "") -> dict:
+    """history — [{"role": "user"|"assistant", "content": ...}]; lead — текст заказа, если пишем первыми;
+    context — где идёт разговор (например, в боте для заказов, а не в личке)."""
+    messages = [{"role": "system", "content": PROMPT + (f"\n\nГде ты сейчас: {context}" if context else "")}]
     if lead:
         messages.append({"role": "user", "content": FIRST + lead})
     messages += history

@@ -22,6 +22,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 import factory
+import sales
 from orders import Orders, pay_link
 
 log = logging.getLogger("workshop")
@@ -211,8 +212,8 @@ async def on_buyer_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if orders.setting(f"blocked:{user_id}"):
         return
     pending = orders.setting(f"await_change:{user_id}")
-    if not pending:
-        await update.message.reply_text("Если нужно поправить готового бота — нажмите «Нужно поправить» под архивом.")
+    if not pending:  # не правка готового бота — значит, человек пришёл заказать: с ним говорит продавец
+        await sales.handle(update, ctx)
         return
     orders.set_setting(f"await_change:{user_id}", None)
     order_id, owner = int(pending), ctx.bot_data["owner"]
