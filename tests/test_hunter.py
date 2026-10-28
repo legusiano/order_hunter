@@ -4,10 +4,10 @@ from hunter import format_lead, matches
 def test_matches_telegram_bots():
     assert matches("Разработка бота для Телеграм", "")
     assert matches("Нужен телеграм-бот для записи", "")
-    assert matches("TG bot для магазина", "")
+    assert matches("Нужен TG bot для магазина", "")
     assert matches("Чат бот", "нужен бот в тг, который принимает заявки")
-    assert matches("Мини-приложение в Telegram", "")
-    assert matches("ИИ-ассистент в телеграм для салона", "отвечает клиентам и записывает")
+    assert matches("Нужно мини-приложение в Telegram", "")
+    assert matches("Нужен ИИ-ассистент в телеграм для салона", "отвечает клиентам и записывает")
 
 
 def test_skips_not_telegram():
@@ -39,3 +39,11 @@ def test_write_button_prefills_text():
     from hunter import write_button
     url = write_button("ivan", "Привет! Делаю ботов")["inline_keyboard"][0][0]["url"]
     assert url.startswith("https://t.me/ivan?text=") and " " not in url
+
+
+def test_only_one_off_orders():
+    assert matches("Нужен бот для Telegram", "бюджет 2000, срок неделя, пишите @me")
+    assert matches("Кто может сделать телеграм-бота для кофейни?", "")
+    assert not matches("Вакансия: Python-разработчик (Telegram-боты)", "удалённо, опыт от 2 лет")
+    assert not matches("Разработчик Telegram-ботов в команду", "занятость полная")
+    assert not matches("Пишу Telegram-ботов", "портфолио в профиле")  # реклама исполнителя, а не заказ
