@@ -37,15 +37,18 @@ class Orders:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         columns = {r[1] for r in self.conn.execute("PRAGMA table_info(orders)")}
-        if "spec" not in columns:  # ТЗ появилось вместе с фабрикой — старые базы дополняем
-            self.conn.execute("ALTER TABLE orders ADD COLUMN spec TEXT NOT NULL DEFAULT ''")
-            self.conn.commit()
+        # колонки, появившиеся вместе с фабрикой, — старые базы дополняем
+        for name, ddl in (("spec", "TEXT NOT NULL DEFAULT ''"), ("revisions", "INTEGER NOT NULL DEFAULT 0"),
+                          ("parent_id", "INTEGER")):  # parent_id — доплата за доработку к этому заказу
+            if name not in columns:
+                self.conn.execute(f"ALTER TABLE orders ADD COLUMN {name} {ddl}")
+        self.conn.commit()
 
-    def create(self, title: str, stars: int, spec: str = "") -> int:
+    def create(self, title: str, stars: int, spec: str = "", parent_id: int | None = None) -> int:
         if stars < 1 or not title.strip():
             raise ValueError("нужны название и цена от 1 звезды")
-        cur = self.conn.execute("INSERT INTO orders (title, stars, spec, created_at) VALUES (?, ?, ?, ?)",
-                                (title.strip()[:200], stars, spec.strip(), int(time.time())))
+        cur = self.conn.execute("INSERT INTO orders (title, stars, spec, parent_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                                (title.strip()[:200], stars, spec.strip(), parent_id, int(time.time())))
         self.conn.commit()
         return cur.lastrowid
 
@@ -80,6 +83,23 @@ class Orders:
 
     def recent(self, limit: int = 15) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+    def add_revision(self, order_id: int) -> int:
+        self.conn.execute("UPDATE orders SET revisions = revisions + 1 WHERE id = ?", (order_id,))
+        self.conn.commit()
+        return self.get(order_id)["revisions"]
+
+    def setting(self, name: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM settings WHERE name = ?", (name,)).fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, name: str, value: str | None):
+        if value is None:
+            self.conn.execute("DELETE FROM settings WHERE name = ?", (name,))
+        else:
+            self.conn.execute("INSERT INTO settings (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET "
+                              "value = excluded.value", (name, value))
+        self.conn.commit()
 
 
 class Dialogs:

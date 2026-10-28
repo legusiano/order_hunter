@@ -13,6 +13,7 @@ import json
 import re
 import shutil
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -200,25 +201,60 @@ async def build(order_id: int, title: str, spec: str, progress=None, comment: st
         messages = [{"role": "system", "content": PROMPT}, {"role": "user", "content": task}]
         files = parse_files(await ask(messages))
 
-    for attempt in range(1, ATTEMPTS + 1):
+    suffix = f"-fix{int(time.time()) % 100000}" if comment else ""
+    reviewed, attempt, gaps = False, 0, []
+    while True:
+        attempt += 1
         if absent := missing(files):
             ok, log = False, "в проекте не хватает файлов: " + ", ".join(absent)
         else:
             await say(f"🔎 Попытка {attempt}: проверяю код на GitHub…")
-            ok, log = await check_on_github(f"order-{order_id}-{attempt}{'-fix' if comment else ''}", files)
+            ok, log = await check_on_github(f"order-{order_id}-{attempt}{suffix}", files)
+        if ok and not reviewed:
+            # тесты прошли — второй проход: всё ли из ТЗ сделано. Без этого автовыдача отдала бы «пустышку»
+            reviewed = True
+            gaps = await review(task, files)
+            if gaps:
+                await say("🧐 Самопроверка по ТЗ: доделываю — " + "; ".join(gaps)[:500])
+                messages = [{"role": "system", "content": PROMPT}, {"role": "user", "content": task},
+                            {"role": "assistant", "content": files_prompt(files)},
+                            {"role": "user", "content": REVISE.format(comment="не реализовано по ТЗ: " + "; ".join(gaps))}]
+                files = merge(files, parse_files(await ask(messages)))
+                continue
         if ok:
             save(order_id, files)
             tests = sum(len(re.findall(r"^(?:async )?def test_", c, re.M)) for p, c in files.items() if p.startswith("tests/"))
-            return {"files": files, "zip": BUILDS / f"order_{order_id}.zip", "attempts": attempt, "tests": tests}
-        if attempt == ATTEMPTS:
+            return {"files": files, "zip": BUILDS / f"order_{order_id}.zip", "attempts": attempt, "tests": tests,
+                    "gaps_fixed": gaps}
+        if attempt >= ATTEMPTS + (1 if reviewed else 0):
             save(order_id, files)  # чтобы можно было доработать вручную
-            raise BuildError(f"не собрался за {ATTEMPTS} попытки. Последняя ошибка:\n{log[-1500:]}")
+            raise BuildError(f"не собрался за {attempt} попытки. Последняя ошибка:\n{log[-1500:]}")
         await say(f"🔧 Попытка {attempt} не прошла, ИИ исправляет…")
         messages = [{"role": "system", "content": PROMPT}, {"role": "user", "content": task},
                     {"role": "assistant", "content": files_prompt(files)},
                     {"role": "user", "content": FIX.format(log=log[-6000:])}]
         files = merge(files, parse_files(await ask(messages)))
-    raise BuildError("недостижимо")
+
+
+REVIEW = """Ты — строгий проверяющий. Сверь проект с ТЗ по каждому пункту: реализован ли он по-настоящему (не заглушка,
+не TODO, есть обработчик/кнопка/логика, которые этот пункт делают).
+
+{task}
+
+Проект:
+{files}
+
+Ответ — только JSON: {{"missing": ["пункт ТЗ, который не сделан или сделан не полностью — коротко"]}}.
+Если всё сделано — {{"missing": []}}."""
+
+
+async def review(task: str, files: dict[str, str]) -> list[str]:
+    text = await ask([{"role": "user", "content": REVIEW.format(task=task, files=files_prompt(files))}])
+    try:
+        data = json.loads(text[text.find("{"):text.rfind("}") + 1])
+        return [str(x).strip() for x in data.get("missing", []) if str(x).strip()][:8]
+    except ValueError:
+        return []  # проверяющий ответил не по формату — не блокируем выдачу, тесты уже прошли
 
 
 async def _demo(spec: str):

@@ -5,7 +5,8 @@
   /order <звёзды> <что делаем> — создать заказ и получить ссылку на оплату
   /orders — последние заказы
   /refund <id> — вернуть звёзды за заказ
-После оплаты — фабрика собирает бота (workshop.py, factory.py), владельцу приходит архив с «Отдать» / «Доработать».
+После оплаты — фабрика собирает бота (workshop.py, factory.py): до 1500 ⭐ бот отдаёт его сам, от 1500 ⭐ — сначала
+владельцу с «Отдать» / «Доработать». Заказчик может попросить правки прямо в боте.
 Плюс режим «переписка через бота» (assist.py): пересланное сообщение заказчика → готовый ответ от ИИ-продавца.
 Охотник (hunter.py) шлёт сообщения тем же ботом, но обновления не читает, поэтому они не мешают друг другу.
 """
@@ -125,6 +126,7 @@ def main():
     app = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
     app.bot_data["orders"] = Orders()
     app.bot_data["dialogs"] = Dialogs(app.bot_data["orders"].conn)
+    app.bot_data["owner"] = OWNER
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("order", new_order))
     app.add_handler(CommandHandler("orders", list_orders))
@@ -137,7 +139,11 @@ def main():
     app.add_handler(CommandHandler("reset", assist.reset_client, filters=owner))
     app.add_handler(CommandHandler("build", workshop.build_cmd, filters=owner))
     app.add_handler(CommandHandler("fix", workshop.fix_cmd, filters=owner))
-    app.add_handler(CallbackQueryHandler(workshop.on_button, pattern=r"^(deliver|fix):\d+$"))
+    app.add_handler(CommandHandler("auto", workshop.auto_cmd, filters=owner))
+    app.add_handler(CallbackQueryHandler(workshop.on_owner_button, pattern=r"^(deliver|fix):\d+$"))
+    app.add_handler(CallbackQueryHandler(workshop.on_buyer_button, pattern=r"^(ok|change):\d+$"))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND & ~filters.User(OWNER),
+                                   workshop.on_buyer_text))
     app.add_handler(MessageHandler(owner & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND, assist.on_text))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 

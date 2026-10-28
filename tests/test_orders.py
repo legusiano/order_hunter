@@ -39,3 +39,28 @@ def test_bad_order_rejected(orders):
 
 def test_pay_link():
     assert pay_link("zakaz_hunter_kirill_bot", 42) == "https://t.me/zakaz_hunter_kirill_bot?start=order_42"
+
+
+def test_revisions_parent_and_settings(orders):
+    from workshop import root
+    base = orders.create("Бот записи", 900, "ТЗ: запись")
+    child = orders.create("Оплата картой", 300, "добавить оплату", parent_id=base)
+    assert root(orders, child) == base and root(orders, base) == base
+    assert orders.add_revision(base) == 1 and orders.add_revision(base) == 2
+    orders.set_setting("auto_deliver", "off")
+    assert orders.setting("auto_deliver") == "off"
+    orders.set_setting("auto_deliver", None)
+    assert orders.setting("auto_deliver") is None
+
+
+def test_old_database_gets_new_columns(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, stars INTEGER NOT NULL, "
+                 "status TEXT NOT NULL DEFAULT 'new', buyer_id INTEGER, buyer_username TEXT, charge_id TEXT UNIQUE, "
+                 "created_at INTEGER NOT NULL, paid_at INTEGER)")
+    conn.commit()
+    conn.close()
+    order_id = Orders(path).create("Бот", 100, "ТЗ", parent_id=None)
+    assert Orders(path).get(order_id)["revisions"] == 0
