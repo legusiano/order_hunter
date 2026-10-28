@@ -17,6 +17,8 @@ from telegram.ext import ContextTypes
 import seller
 from orders import Dialogs, Orders
 
+BIG_ORDER_RUB = 5000  # дороже — Кирилл ведёт сам
+STAR_RUB = 1.3
 DAILY_LIMIT = 40  # сообщений от одного человека в день — чтобы никто не «съел» деньги на ИИ
 CONTEXT = ("Ты отвечаешь не в личке Кирилла, а в его Telegram-боте для заказов. Человек сам написал в бот. "
            "Представляйся помощником Кирилла (не самим Кириллом): «Я помощник Кирилла, принимаю заказы на ботов». "
@@ -71,6 +73,9 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     order_id = dialogs.order_id(key(user.id))
     new_order = None
+    big = answer.get("order") and int(answer["order"].get("stars") or 0) * STAR_RUB > BIG_ORDER_RUB
+    if big:  # дороже 5000 ₽ договаривается Кирилл лично — счёт сами не выставляем
+        answer["stage"] = "need_owner"
     if answer["stage"] == "agreed" and answer.get("order") and not order_id:
         try:
             new_order = orders.create(answer["order"]["title"], int(answer["order"]["stars"]),
@@ -95,7 +100,8 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif answer["stage"] == "need_owner":
         who = f"@{user.username}" if user.username else f"id {user.id}"
         try:
-            await ctx.bot.send_message(owner, f"⚠️ Крупный заказ в боте от {who}: назови цену. Создать счёт: "
-                                              f"/order <звёзды> <что делаем> — и перешли ссылку человеку.")
+            await ctx.bot.send_message(owner, f"💎 Крупный или нестандартный заказ в боте от {who} — напиши ему сам "
+                                              f"в лс. Последнее: «{update.message.text[:300]}». Счёт: "
+                                              f"/order <звёзды> <что делаем>, ссылку перешли ему.")
         except TelegramError:
             pass

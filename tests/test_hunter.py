@@ -52,7 +52,20 @@ def test_only_one_off_orders():
 def test_relaxed_and_tagged():
     assert matches("Срочно нужен бот на пайтон в течении 1 недели", "")
     assert not matches("Бот для Android (Python + ADB)", "нужен бот")
-    assert not matches("Нужен чат-бот для сайта стоматологии", "бюджет 20000")
+    assert matches("Нужен чат-бот для сайта стоматологии", "бюджет 20000")  # с 28.10 берём любых ботов
+    assert not matches("HeroComputer — разработка IT-проектов под ключ", "делаем ботов, оставьте заявку")
     # в рубрике заказов признак заказа не обязателен, а метка рубрики не считается словом «бот»
     assert matches("Чат бот", "Бот для приёма заявок в телеграм", tagged=True)
     assert not matches("ИИ-видео про исторические места", "#скрипты_боты_miniapp", tagged=True)
+
+
+def test_budget():
+    from hunter import budget
+    assert budget("Бюджет: От 30,000 ₽ до 90,000 ₽") == 90000
+    assert budget("до 5к, срочно") == 5000 and budget("бюджет 1.5 тыс") == 1500
+    assert budget("15 000 р.") == 15000 and budget("без бюджета") == 0
+
+
+def test_any_bot_platform_now_ok():
+    assert matches("Нужен бот для VK", "бюджет 3000, пишите @me")
+    assert not matches("Нужен бот для Roblox", "бюджет 3000")

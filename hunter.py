@@ -45,7 +45,10 @@ EXCLUDE = re.compile(r"в штат|полный рабочий день|full.?ti
                      r"обязанност|будет плюсом|оклад|зарплат|\bз/п\b|#вакансия|#(junior|middle|senior)\b|"
                      r"резюме|дайджест|подборк|лучшие вакансии|вакансия|в команду|занятость|график работы|"
                      r"опыт работы от|опыт от \d|трудоустр|оформление по|соцпакет|\bДМС\b|разработчик в компанию|"
-                     r"на правах рекламы|подписывайтесь|наш курс|вебинар|диджитализация", re.I)
+                     r"на правах рекламы|подписывайтесь|наш курс|вебинар|диджитализация|"
+                     # реклама студий и исполнителей — это конкуренты, а не заказчики
+                     r"мы (делаем|разрабатываем|создаём|создаем)|наша команда|наши услуги|оставьте заявку|"
+                     r"разработка .{0,30}под ключ", re.I)
 # берём только разовые заказы: в посте должно быть видно, что человеку нужно что-то сделать под ключ
 ORDER = re.compile(r"нуж(ен|на|но|ны)|требуется|ищу (исполнител|разработчик|программист|кто)|ищем исполнител|"
                    r"(сделать|создать|разработать|написать|доработать|настроить|разработк\w*) (бот|телеграм|tg|тг|мини|ии)|"
@@ -65,10 +68,26 @@ def clean(text: str) -> str:
 # «нужен бот на пайтон» без слова «телеграм» — тоже наше; а вот боты для других площадок и железа — нет
 ANY_BOT = re.compile(r"чат.?бот|\bбот(а|у|ом|ов|ы)?\b|\bbot\b|mini ?app|мини.?апп|мини.?прилож|ии.?ассистент|"
                      r"ai.?ассистент|ии.?агент|ai.?agent|ии.?менеджер", re.I)
-OTHER_PLATFORM = re.compile(r"whats.?app|ватсап|вотсап|\bвк\b|\bvk\b|вконтакте|instagram|инстаграм|avito|авито|"
-                            r"discord|дискорд|для сайта|на сайт|виджет|amocrm|битрикс|raspberry|роблокс|roblox|"
-                            r"майнкрафт|minecraft|\bmax\b|мессенджер(е|а)? max|lptracker|дзен|ютуб|youtube|"
-                            r"black russia|\bsamp\b|\bgta\b|android|\badb\b|игров|письм|почт|e-?mail", re.I)
+# берём любых ботов (Telegram, VK, WhatsApp, Discord, для сайта); не берём игровых ботов, железо и «накрутку»
+OTHER_PLATFORM = re.compile(r"raspberry|роблокс|roblox|майнкрафт|minecraft|black russia|\bsamp\b|\bgta\b|android|"
+                            r"\badb\b|игров|дзен|ютуб|youtube|накрут|просмотр", re.I)
+# бюджет из текста заказа, чтобы крупные (от BIG_BUDGET ₽) отдавать Кириллу лично
+BUDGET = re.compile(r"(\d[\d  .,]*)\s*(тыс|к\b|k\b|₽|руб|р\.|rub)", re.I)
+BIG_BUDGET = 5000
+
+
+def budget(text: str) -> int:
+    """Самая большая сумма в рублях: «30,000 ₽», «90 000 руб», «5к», «1.5 тыс»."""
+    best = 0
+    for raw, unit in BUDGET.findall(text):
+        raw = raw.strip().replace(" ", " ")
+        if unit.lower() in ("тыс", "к", "k"):
+            number = raw.replace(" ", "")
+            value = float(number.replace(",", ".")) * 1000 if re.fullmatch(r"\d+([.,]\d+)?", number) else 0
+        else:
+            value = float(re.sub(r"\D", "", re.sub(r"[.,]\d{1,2}$", "", raw)) or 0)  # копейки отбрасываем
+        best = max(best, int(value))
+    return best
 
 
 def matches(title: str, body: str, tagged: bool = False) -> bool:
@@ -104,8 +123,9 @@ async def collect() -> tuple[list[dict], list[str]]:
             else:
                 leads += res
     unique = {lead["id"]: lead for lead in leads}
+    # только заказы с @юзером заказчика: где надо писать на сайте или бирже — не берём
     return [lead for lead in unique.values()
-            if matches(lead["title"], lead["body"], tagged=lead.get("tagged", False))], errors
+            if matches(lead["title"], lead["body"], tagged=lead.get("tagged", False)) and contact(lead)], errors
 
 
 def format_lead(lead: dict) -> str:
@@ -163,6 +183,8 @@ async def send_lead(lead: dict):
     username = contact(lead)
     draft_text = await draft(lead) if username else None
     text = format_lead(lead)
+    if (money := budget(lead["body"])) >= BIG_BUDGET:
+        text = f"💎 Крупный заказ — бюджет до {money:,} ₽, напиши ему сам!\n\n".replace(",", " ") + text
     if draft_text:
         await send(f"{text}\n\n✍️ Черновик для @{username}:\n{draft_text}", write_button(username, draft_text))
     else:
