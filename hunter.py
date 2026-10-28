@@ -1,4 +1,4 @@
-"""Охотник за заказами: каждые 30 минут (GitHub Actions, .github/workflows/hunter.yml) смотрит открытые ленты заказов
+"""Охотник за заказами: каждые 10 минут (GitHub Actions, .github/workflows/hunter.yml) смотрит открытые ленты заказов
 и присылает владельцу в Telegram свежие заявки на Telegram-ботов и мини-аппы. Без входа в Telegram и без ИИ.
 
 Откуда берёт: только открытые ТГ-каналы с заказами — через веб-превью t.me/s/<канал> (биржи Кириллу неудобны).
@@ -21,9 +21,11 @@ load_dotenv(Path(__file__).parent / ".env")
 STATE = Path(__file__).parent / "state.json"
 
 OWNER_CHAT = int(os.getenv("OWNER_CHAT_ID", "2093180872"))
-# открытые каналы с заказами, где есть свежие посты (проверено 27.10.2026)
+# открытые каналы с заказами, где есть свежие посты (проверено 27–28.10.2026)
 CHANNELS = ["freelancetaverna", "workk_on", "FrWork3", "FreeWorkFeed", "allgigs", "devjobs", "frilancekomfort",
-            "job_python", "vakansii_it", "work_finde", "normrabota", "remote_w0rk", "dddwork", "digitaltender"]
+            "job_python", "vakansii_it", "work_finde", "normrabota", "remote_w0rk", "dddwork", "digitaltender",
+            "Getitrussia", "dnative_job", "evacuatejobs", "jobforjunior", "morejobs", "onlinevakansii", "rabotka_zdes",
+            "yuniorapp", "javascript_jobs_feed", "zakazy_it", "freelance_zakazy", "jobbyrussia", "chooseajob"]
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"}
 MAX_PER_RUN = 10
 FIRST_RUN = 5
@@ -38,7 +40,8 @@ KEYWORDS = re.compile(rf"{TG}[^.!?\n]{{0,30}}{WHAT}|{WHAT}[^.!?\n]{{0,30}}{TG}",
 HUMAN = re.compile(r"(личн|бизнес|виртуальн|онлайн|удал[её]нн)\S*.?ассистент|ассистент.?(руководител|директор)", re.I)
 # а это не про нас: вакансии в штат и чужие боты, которые надо просто «продвинуть»
 EXCLUDE = re.compile(r"в штат|полный рабочий день|full.?time|ботокс|робот.?пылесос|накрут|"
-                     r"обязанност|будет плюсом|оклад|зарплат|\bз/п\b|#вакансия|#(junior|middle|senior)\b", re.I)
+                     r"обязанност|будет плюсом|оклад|зарплат|\bз/п\b|#вакансия|#(junior|middle|senior)\b|"
+                     r"резюме|дайджест|подборк|лучшие вакансии", re.I)
 # заказ не на разработку: в заголовке другая профессия
 ROLE = re.compile(r"копирайтер|сценарист|дизайнер|маркетолог|\bsmm|менеджер|монтаж|рилс|таргет|ассистент руковод", re.I)
 
