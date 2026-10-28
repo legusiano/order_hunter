@@ -1,9 +1,10 @@
 name: Охотник за заказами
 
 on:
-  schedule:
-    - cron: "*/10 * * * *"  # каждые 10 минут; присылает в Telegram новые заказы на ботов, мини-аппы и ИИ-ассистентов
+  # по расписанию охотник теперь работает в кассе на компьютере (GitHub пропускал частые запуски);
+  # здесь — ручной запуск и тесты
   workflow_dispatch:
+  push:
 
 permissions:
   contents: read
@@ -27,6 +28,7 @@ jobs:
           key: hunter-state-${{ github.run_id }}
           restore-keys: hunter-state-
       - run: python hunter.py
+        if: github.event_name == 'workflow_dispatch'  # на push только тесты — иначе заказы пришли бы дважды
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}  # для черновика первого сообщения; без него — просто контакт

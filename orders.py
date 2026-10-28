@@ -55,16 +55,24 @@ class Orders:
     def get(self, order_id: int) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
 
-    def can_pay(self, order_id: int, stars: int) -> str | None:
-        """None, если заказ можно оплатить этой суммой, иначе — почему нельзя (это увидит заказчик)."""
+    def can_pay(self, order_id: int, stars: int, payer_id: int) -> str | None:
+        """None, если этот человек может оплатить заказ этой суммой, иначе — почему нельзя (это увидит заказчик)."""
         order = self.get(order_id)
         if not order:
             return "Такого заказа нет. Напиши, пожалуйста, исполнителю."
+        if self.setting(f"blocked:{payer_id}"):
+            return "Оплата недоступна. Напиши, пожалуйста, исполнителю."
         if order["status"] != "new":
             return "Этот заказ уже оплачен."
         if order["stars"] != stars:
             return "Цена заказа изменилась — открой ссылку на оплату ещё раз."
+        # доплату за доработку может оплатить только владелец исходного заказа — иначе чужой получил бы весь код
+        if order["parent_id"] and self.get(order["parent_id"])["buyer_id"] != payer_id:
+            return "Эта доработка относится к чужому заказу."
         return None
+
+    def by_charge(self, charge_id: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM orders WHERE charge_id = ?", (charge_id,)).fetchone()
 
     def mark_paid(self, order_id: int, buyer_id: int, username: str | None, charge_id: str) -> bool:
         """False, если заказ уже был оплачен (Telegram может прислать оплату повторно)."""

@@ -47,3 +47,12 @@ def test_only_one_off_orders():
     assert not matches("Вакансия: Python-разработчик (Telegram-боты)", "удалённо, опыт от 2 лет")
     assert not matches("Разработчик Telegram-ботов в команду", "занятость полная")
     assert not matches("Пишу Telegram-ботов", "портфолио в профиле")  # реклама исполнителя, а не заказ
+
+
+def test_relaxed_and_tagged():
+    assert matches("Срочно нужен бот на пайтон в течении 1 недели", "")
+    assert not matches("Бот для Android (Python + ADB)", "нужен бот")
+    assert not matches("Нужен чат-бот для сайта стоматологии", "бюджет 20000")
+    # в рубрике заказов признак заказа не обязателен, а метка рубрики не считается словом «бот»
+    assert matches("Чат бот", "Бот для приёма заявок в телеграм", tagged=True)
+    assert not matches("ИИ-видео про исторические места", "#скрипты_боты_miniapp", tagged=True)

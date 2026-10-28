@@ -1,4 +1,4 @@
-"""Охотник за заказами: каждые 10 минут (GitHub Actions, .github/workflows/hunter.yml) смотрит открытые ленты заказов
+"""Охотник за заказами: каждые 10 минут внутри кассы на компьютере (cashier.py → loop(); вручную — hunter.yml) смотрит открытые ленты заказов
 и присылает владельцу в Telegram свежие заявки на Telegram-ботов и мини-аппы. Без входа в Telegram и без ИИ.
 
 Откуда берёт: только открытые ТГ-каналы с заказами — через веб-превью t.me/s/<канал> (биржи Кириллу неудобны).
@@ -25,7 +25,9 @@ OWNER_CHAT = int(os.getenv("OWNER_CHAT_ID", "2093180872"))
 CHANNELS = ["freelancetaverna", "workk_on", "FrWork3", "FreeWorkFeed", "allgigs", "devjobs", "frilancekomfort",
             "job_python", "vakansii_it", "work_finde", "normrabota", "remote_w0rk", "dddwork", "digitaltender",
             "Getitrussia", "dnative_job", "evacuatejobs", "jobforjunior", "morejobs", "onlinevakansii", "rabotka_zdes",
-            "yuniorapp", "javascript_jobs_feed", "zakazy_it", "freelance_zakazy", "jobbyrussia", "chooseajob", "FreelanceBay"]
+            "yuniorapp", "javascript_jobs_feed", "zakazy_it", "freelance_zakazy", "jobbyrussia", "chooseajob", "FreelanceBay",
+            # рубрика «скрипты, боты, мини-аппы» — самый плотный источник заказов на ботов
+            "freelance_zakazy#скрипты_боты_miniapp"]
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"}
 MAX_PER_RUN = 10
 FIRST_RUN = 5
@@ -42,14 +44,16 @@ HUMAN = re.compile(r"(личн|бизнес|виртуальн|онлайн|уд
 EXCLUDE = re.compile(r"в штат|полный рабочий день|full.?time|ботокс|робот.?пылесос|накрут|"
                      r"обязанност|будет плюсом|оклад|зарплат|\bз/п\b|#вакансия|#(junior|middle|senior)\b|"
                      r"резюме|дайджест|подборк|лучшие вакансии|вакансия|в команду|занятость|график работы|"
-                     r"опыт работы от|опыт от \d|трудоустр|оформление по|соцпакет|\bДМС\b|разработчик в компанию", re.I)
+                     r"опыт работы от|опыт от \d|трудоустр|оформление по|соцпакет|\bДМС\b|разработчик в компанию|"
+                     r"на правах рекламы|подписывайтесь|наш курс|вебинар|диджитализация", re.I)
 # берём только разовые заказы: в посте должно быть видно, что человеку нужно что-то сделать под ключ
 ORDER = re.compile(r"нуж(ен|на|но|ны)|требуется|ищу (исполнител|разработчик|программист|кто)|ищем исполнител|"
                    r"(сделать|создать|разработать|написать|доработать|настроить|разработк\w*) (бот|телеграм|tg|тг|мини|ии)|"
                    r"бюджет|оплата за проект|\bтз\b|техническ\w* задани|срок|кто (может|сделает|возьм)|#заказ|"
                    r"задача:|за сколько", re.I)
 # заказ не на разработку: в заголовке другая профессия
-ROLE = re.compile(r"копирайтер|сценарист|дизайнер|маркетолог|\bsmm|менеджер|монтаж|рилс|таргет|ассистент руковод", re.I)
+ROLE = re.compile(r"копирайтер|сценарист|дизайнер|маркетолог|\bsmm|менеджер|монтаж|рилс|таргет|ассистент руковод|"
+                  r"engineer|инженер|designer", re.I)
 
 
 def clean(text: str) -> str:
@@ -58,16 +62,30 @@ def clean(text: str) -> str:
     return re.sub(r"[ \t]+", " ", text).strip()
 
 
-def matches(title: str, body: str) -> bool:
-    text = f"{title}\n{body}"
-    if not KEYWORDS.search(text) or not ORDER.search(text) or EXCLUDE.search(text) or ROLE.search(title):
+# «нужен бот на пайтон» без слова «телеграм» — тоже наше; а вот боты для других площадок и железа — нет
+ANY_BOT = re.compile(r"чат.?бот|\bбот(а|у|ом|ов|ы)?\b|\bbot\b|mini ?app|мини.?апп|мини.?прилож|ии.?ассистент|"
+                     r"ai.?ассистент|ии.?агент|ai.?agent|ии.?менеджер", re.I)
+OTHER_PLATFORM = re.compile(r"whats.?app|ватсап|вотсап|\bвк\b|\bvk\b|вконтакте|instagram|инстаграм|avito|авито|"
+                            r"discord|дискорд|для сайта|на сайт|виджет|amocrm|битрикс|raspberry|роблокс|roblox|"
+                            r"майнкрафт|minecraft|\bmax\b|мессенджер(е|а)? max|lptracker|дзен|ютуб|youtube|"
+                            r"black russia|\bsamp\b|\bgta\b|android|\badb\b|игров|письм|почт|e-?mail", re.I)
+
+
+def matches(title: str, body: str, tagged: bool = False) -> bool:
+    text = re.sub(r"#\S+", " ", f"{title}\n{body}")  # метки рубрик вроде #скрипты_боты_miniapp — не текст заказа
+    about_bot = KEYWORDS.search(text) or (ANY_BOT.search(text) and not OTHER_PLATFORM.search(text))
+    if not about_bot or EXCLUDE.search(text) or ROLE.search(title):
+        return False
+    if not tagged and not ORDER.search(text):  # в рубрике заказов признак заказа не нужен
         return False
     # вакансия «личный ассистент, связь в телеграм» — не наше, если про бота там ни слова
     return not HUMAN.search(text) or bool(re.search(r"\bбот|\bbot|mini ?app|мини.?апп", text, re.I))
 
 
 async def fetch_channel(http: httpx.AsyncClient, channel: str) -> list[dict]:
-    r = await http.get(f"https://t.me/s/{channel}")
+    """channel — имя канала или «канал#метка»: тогда берутся только посты с этой меткой (поиск по каналу)."""
+    channel, _, tag = channel.partition("#")
+    r = await http.get(f"https://t.me/s/{channel}", params={"q": f"#{tag}"} if tag else None)
     leads = []
     for post, body in re.findall(r'data-post="([^"]+)".*?tgme_widget_message_text[^>]*>(.*?)</div>', r.text, re.S):
         text = clean(body)
@@ -86,7 +104,8 @@ async def collect() -> tuple[list[dict], list[str]]:
             else:
                 leads += res
     unique = {lead["id"]: lead for lead in leads}
-    return [lead for lead in unique.values() if matches(lead["title"], lead["body"])], errors
+    return [lead for lead in unique.values()
+            if matches(lead["title"], lead["body"], tagged=lead.get("tagged", False))], errors
 
 
 def format_lead(lead: dict) -> str:
@@ -150,13 +169,9 @@ async def send_lead(lead: dict):
         await send(text + (f"\n\nКонтакт: @{username}" if username else ""))
 
 
-async def main(dry: bool = False) -> int:
+async def run_once() -> list[str]:
+    """Один проход: собрать, отфильтровать, прислать новые. Возвращает ошибки источников."""
     leads, errors = await collect()
-    if dry:
-        for lead in leads:
-            print(format_lead(lead), end="\n\n")
-        print(f"подходящих: {len(leads)}; ошибки: {errors}")
-        return 0
     first_run = not STATE.exists()
     state = {"seen": []} if first_run else json.loads(STATE.read_text(encoding="utf-8"))
     seen = set(state["seen"])
@@ -169,7 +184,27 @@ async def main(dry: bool = False) -> int:
     # помним последние ~2000, чтобы состояние не росло бесконечно
     state["seen"] = (state["seen"] + [lead["id"] for lead in fresh])[-2000:]
     STATE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-    if errors:
+    return errors
+
+
+async def loop(every: int = 600):
+    """Охотник внутри кассы на компьютере Кирилла: GitHub по расписанию «раз в 10 минут» запускал раз в час-два."""
+    while True:
+        try:
+            await run_once()
+        except Exception as e:  # сеть, Telegram — следующий проход через 10 минут
+            print("охотник:", repr(e))
+        await asyncio.sleep(every)
+
+
+async def main(dry: bool = False) -> int:
+    if dry:
+        leads, errors = await collect()
+        for lead in leads:
+            print(format_lead(lead), end="\n\n")
+        print(f"подходящих: {len(leads)}; ошибки: {errors}")
+        return 0
+    if errors := await run_once():
         print("ошибки источников:", errors)
     return 0
 

@@ -60,6 +60,11 @@ async def deliver(app, owner: int, order_id: int, note: str = ""):
     orders: Orders = app.bot_data["orders"]
     order = orders.get(order_id)
     base = root(orders, order_id)
+    # отдаём только оплаченное и не возвращённое — ни при каких кнопках и правках
+    if not order["charge_id"] or "refunded" in (order["status"], orders.get(base)["status"]):
+        raise TelegramError("заказ не оплачен или звёзды возвращены — не отдаю")
+    if orders.setting(f"blocked:{order['buyer_id']}"):
+        raise TelegramError("покупатель заблокирован — не отдаю")
     with open(factory.BUILDS / f"order_{base}.zip", "rb") as f:
         await app.bot.send_document(
             order["buyer_id"], f, filename=f"bot_order_{base}.zip", reply_markup=buyer_buttons(base),
@@ -97,6 +102,9 @@ async def start_build(app, owner: int, order_id: int, comment: str | None = None
                 await app.bot.send_message(order["buyer_id"], "Правка оказалась сложнее, чем казалось — передал "
                                                               "исполнителю, он напишет вам.")
             return
+        if orders.get(order_id)["status"] == "refunded":  # пока собирали, звёзды вернули
+            await progress("собран, но звёзды за него уже вернули — заказчику не отдаю.")
+            return
         orders.set_status(order_id, "ready")
         total = orders.get(base)["stars"]
         report = (f"📦 Заказ №{order_id} {'доработан' if comment else 'готов'}: {base_order['title']}\n"
@@ -107,7 +115,11 @@ async def start_build(app, owner: int, order_id: int, comment: str | None = None
         auto = orders.setting("auto_deliver") != "off"
         if order["buyer_id"] and auto and total < REVIEW_FROM:
             note = f"🔧 Готово, поправили: {comment}"[:500] if comment else ""
-            await deliver(app, owner, order_id, note)
+            try:
+                await deliver(app, owner, order_id, note)
+            except TelegramError as e:
+                await progress(f"{report}\n⚠️ Не отдал: {e}")
+                return
             await progress(report + "\n🎁 Отдал заказчику автоматически.")
             return
         with open(result["zip"], "rb") as f:
@@ -119,6 +131,8 @@ async def start_build(app, owner: int, order_id: int, comment: str | None = None
 async def on_owner_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+    if q.from_user.id != ctx.bot_data["owner"]:  # кнопку «Отдать» можно подделать из чужого клиента
+        return
     action, order_id = q.data.split(":", 1)
     order_id = int(order_id)
     orders: Orders = ctx.bot_data["orders"]
@@ -144,7 +158,7 @@ async def on_buyer_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     order_id = int(order_id)
     orders: Orders = ctx.bot_data["orders"]
     order = orders.get(order_id)
-    if not order or order["buyer_id"] != q.from_user.id:
+    if not order or order["buyer_id"] != q.from_user.id or orders.setting(f"blocked:{q.from_user.id}"):
         return
     owner = ctx.bot_data["owner"]
     if action == "ok":
@@ -161,6 +175,8 @@ async def on_buyer_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Сообщение заказчика после «Нужно поправить»."""
     orders: Orders = ctx.bot_data["orders"]
     user_id = update.effective_user.id
+    if orders.setting(f"blocked:{user_id}"):
+        return
     pending = orders.setting(f"await_change:{user_id}")
     if not pending:
         await update.message.reply_text("Если нужно поправить готового бота — нажмите «Нужно поправить» под архивом.")
@@ -188,7 +204,8 @@ async def on_buyer_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.application.create_task(start_build(ctx.application, owner, order_id, verdict.get("comment") or text,
                                                 free_fix=True))
     elif verdict.get("kind") == "new":
-        stars = max(50, int(verdict.get("stars") or 300))
+        # цену назвал ИИ по сообщению заказчика — его можно «уговорить», поэтому держим в разумных рамках
+        stars = min(3000, max(150, int(verdict.get("stars") or 300)))
         child = orders.create(verdict.get("title") or "Доработка", stars, verdict.get("comment") or text,
                               parent_id=order_id)
         await update.message.reply_text(

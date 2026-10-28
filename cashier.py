@@ -22,6 +22,7 @@ from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, Con
                           PreCheckoutQueryHandler, filters)
 
 import assist
+import hunter
 import workshop
 from orders import Dialogs, Orders, pay_link
 
@@ -44,7 +45,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                                         "исполнитель после того, как вы обсудите задачу.")
         return
     order = orders.get(int(arg[6:]))
-    if problem := orders.can_pay(int(arg[6:]), order["stars"] if order else 0):
+    if problem := orders.can_pay(int(arg[6:]), order["stars"] if order else 0, update.effective_user.id):
         await update.message.reply_text(problem)
         return
     await update.message.reply_text(
@@ -58,7 +59,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def precheckout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.pre_checkout_query
     order_id = int(q.invoice_payload.split(":", 1)[1])
-    problem = ctx.bot_data["orders"].can_pay(order_id, q.total_amount)
+    problem = ctx.bot_data["orders"].can_pay(order_id, q.total_amount, q.from_user.id)
     await q.answer(ok=problem is None, error_message=problem)
 
 
@@ -103,8 +104,13 @@ async def refund(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     orders: Orders = ctx.bot_data["orders"]
     order = orders.get(int(ctx.args[0])) if ctx.args and ctx.args[0].isdigit() else None
-    if not order or order["status"] != "paid":
+    if not order or not order["charge_id"] or order["status"] == "refunded":
         await update.message.reply_text("Формат: /refund <номер оплаченного заказа>")
+        return
+    # бот уже у заказчика: возврат отдаёт ему и код, и звёзды — только осознанно
+    if order["status"] == "delivered" and "force" not in ctx.args[1:]:
+        await update.message.reply_text(f"Заказ №{order['id']} уже отдан — код у заказчика. Если всё равно вернуть "
+                                        f"звёзды: /refund {order['id']} force")
         return
     try:
         await ctx.bot.refund_star_payment(order["buyer_id"], order["charge_id"])
@@ -119,11 +125,31 @@ async def refund(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+async def refunded_by_telegram(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Звёзды вернул сам Telegram (жалоба покупателя) — отмечаем заказ и больше не принимаем оплату от этого человека."""
+    refund_info = update.message.refunded_payment if update.message else None
+    if not refund_info:
+        return
+    orders: Orders = ctx.bot_data["orders"]
+    order = orders.by_charge(refund_info.telegram_payment_charge_id)
+    orders.set_setting(f"blocked:{update.effective_user.id}", "refund")
+    if order:
+        was_delivered = order["status"] == "delivered"
+        orders.mark_refunded(order["id"])
+        await ctx.bot.send_message(OWNER, f"🚨 Telegram вернул {refund_info.total_amount} ⭐ за заказ №{order['id']} "
+                                          f"покупателю {update.effective_user.id}"
+                                          f"{' — бот уже был отдан' if was_delivered else ''}. Покупатель заблокирован.")
+
+
+async def start_hunter(app: Application):
+    app.create_task(hunter.loop())  # поиск заказов каждые 10 минут — в этом же процессе
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         filename=Path(__file__).parent / "cashier.log", encoding="utf-8")
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    app = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
+    app = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).post_init(start_hunter).build()
     app.bot_data["orders"] = Orders()
     app.bot_data["dialogs"] = Dialogs(app.bot_data["orders"].conn)
     app.bot_data["owner"] = OWNER
@@ -144,6 +170,7 @@ def main():
     app.add_handler(CallbackQueryHandler(workshop.on_buyer_button, pattern=r"^(ok|change):\d+$"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND & ~filters.User(OWNER),
                                    workshop.on_buyer_text))
+    app.add_handler(MessageHandler(filters.ALL, refunded_by_telegram), group=1)
     app.add_handler(MessageHandler(owner & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND, assist.on_text))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
