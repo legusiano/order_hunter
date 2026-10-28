@@ -22,6 +22,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 import factory
+import guide
 import sales
 from orders import Orders, pay_link
 
@@ -59,7 +60,28 @@ def owner_buttons(order_id: int) -> InlineKeyboardMarkup:
 
 def buyer_buttons(order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Всё отлично", callback_data=f"ok:{order_id}"),
-                                  InlineKeyboardButton("✏️ Нужно поправить", callback_data=f"change:{order_id}")]])
+                                  InlineKeyboardButton("✏️ Нужно поправить", callback_data=f"change:{order_id}")],
+                                 [InlineKeyboardButton("🆘 Не получается запустить", callback_data=f"help:{order_id}")]])
+
+
+SUPPORT = """Ты — терпеливая техподдержка. Заказчик без опыта не может запустить Telegram-бота, которого ему сделали.
+Объясни простыми словами, по шагам, что сделать именно в его ситуации. Команды — отдельными строками, чтобы их
+можно было скопировать. Если по сообщению непонятно, что происходит, — попроси прислать текст ошибки или
+скриншот описать словами. Без markdown-звёздочек. Не проси прислать токен или пароли.
+
+README бота:
+{readme}
+
+.env.example:
+{env}
+
+Сообщение заказчика:
+{text}"""
+
+
+def build_file(order_id: int, path: str) -> str:
+    target = factory.BUILDS / f"order_{order_id}" / path
+    return target.read_text(encoding="utf-8") if target.exists() else ""
 
 
 def root(orders: Orders, order_id: int) -> int:
@@ -81,8 +103,9 @@ async def deliver(app, owner: int, order_id: int, note: str = ""):
         await app.bot.send_document(
             order["buyer_id"], f, filename=f"bot_order_{base}.zip", reply_markup=buyer_buttons(base),
             caption=(note or f"🎉 Ваш бот готов! Заказ №{base}: {orders.get(base)['title']}") +
-                    "\n\nВнутри README.md — пошаговая инструкция: как получить токен у @BotFather и запустить бота. "
+                    "\n\nНиже — подробная инструкция, как его запустить. "
                     "Если что-то не так — нажмите «Нужно поправить» и опишите, исправим.")
+    await app.bot.send_message(order["buyer_id"], guide.build(build_file(base, ".env.example")))
     orders.set_status(order_id, "delivered")
     orders.set_setting(f"deliver_at:{order_id}", None)
     orders.set_setting(f"deliver_note:{order_id}", None)
@@ -195,7 +218,13 @@ async def on_buyer_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not order or order["buyer_id"] != q.from_user.id or orders.setting(f"blocked:{q.from_user.id}"):
         return
     owner = ctx.bot_data["owner"]
+    if action == "help":
+        orders.set_setting(f"await_help:{q.from_user.id}", str(order_id))
+        await q.message.reply_text("Опишите, на каком шаге застряли и что видите на экране — лучше скопируйте текст "
+                                   "ошибки целиком. Помогу разобраться.")
+        return
     if action == "ok":
+        orders.set_setting(f"await_help:{q.from_user.id}", None)
         await q.edit_message_reply_markup(None)
         await q.message.reply_text("Спасибо! Рады, что всё работает 🙌 Если понадобится что-то ещё — пишите.")
         await ctx.bot.send_message(owner, f"⭐ Заказчик доволен заказом №{order_id}.")
@@ -212,6 +241,24 @@ async def on_buyer_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if orders.setting(f"blocked:{user_id}"):
         return
     pending = orders.setting(f"await_change:{user_id}")
+    helping = orders.setting(f"await_help:{user_id}")
+    if helping and not pending:  # помогаем запустить — пока не нажмёт «Всё отлично»
+        if sales.over_limit(orders, user_id):
+            await update.message.reply_text("На сегодня я уже много ответил — напишите завтра, или дождитесь "
+                                            "исполнителя, я ему передал.")
+            return
+        base = root(orders, int(helping))
+        await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
+        try:
+            answer = await factory.ask([{"role": "user", "content": SUPPORT.format(
+                readme=build_file(base, "README.md")[:6000], env=build_file(base, ".env.example"),
+                text=update.message.text)}])
+        except factory.BuildError:
+            answer = "Сейчас не могу ответить — передал исполнителю, он поможет."
+        await update.message.reply_text(answer[:4000])
+        await ctx.bot.send_message(ctx.bot_data["owner"], f"🆘 Заказчик №{base} не может запустить: "
+                                                          f"{update.message.text[:500]}")
+        return
     if not pending:  # не правка готового бота — значит, человек пришёл заказать: с ним говорит продавец
         await sales.handle(update, ctx)
         return

@@ -202,7 +202,7 @@ def main():
     app.add_handler(CommandHandler("fix", workshop.fix_cmd, filters=owner))
     app.add_handler(CommandHandler("auto", workshop.auto_cmd, filters=owner))
     app.add_handler(CallbackQueryHandler(workshop.on_owner_button, pattern=r"^(deliver|fix):\d+$"))
-    app.add_handler(CallbackQueryHandler(workshop.on_buyer_button, pattern=r"^(ok|change):\d+$"))
+    app.add_handler(CallbackQueryHandler(workshop.on_buyer_button, pattern=r"^(ok|change|help):\d+$"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND & ~filters.User(OWNER),
                                    workshop.on_buyer_text))
     app.add_handler(MessageHandler(filters.ALL, refunded_by_telegram), group=1)
