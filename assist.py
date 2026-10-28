@@ -16,6 +16,7 @@ from telegram import Message, MessageOriginChannel, MessageOriginChat, MessageOr
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import ContextTypes
 
+import sales
 import seller
 from orders import Dialogs, Orders, pay_link
 
@@ -66,9 +67,12 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     history.append({"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)})
 
-    order_id = dialogs.order_id(client)
+    current = orders.get(dialogs.order_id(client) or 0)
+    action = sales.decide(answer, current["status"] if current else None)
     new_order = None
-    if answer["stage"] == "agreed" and answer.get("order") and not order_id:
+    if action == "owner":
+        answer["stage"] = "need_owner"
+    if action == "create":
         try:
             new_order = orders.create(answer["order"]["title"], int(answer["order"]["stars"]),
                                       answer["order"].get("spec", ""), kind=answer["order"].get("kind") or "telegram")
@@ -81,6 +85,9 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     for part in answer["messages"]:
         await message.reply_text(code(part), parse_mode=ParseMode.HTML)
 
+    if action == "resend":
+        await message.reply_text(f"Заказ №{current['id']} уже создан, ссылка на оплату для заказчика:")
+        await message.reply_text(code(pay_link(ctx.bot.username, current["id"])), parse_mode=ParseMode.HTML)
     if new_order:
         order = answer["order"]
         link = pay_link(ctx.bot.username, new_order)

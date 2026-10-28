@@ -27,6 +27,29 @@ GREETING = ("Привет! 👋 Я помощник Кирилла — прин�
             "Расскажите, что за бизнес или задача и что бот должен делать — подскажу решение, цену и срок.")
 
 
+MIN_STARS = 500  # ≈ 650 ₽ — ниже нижней границы сетки ИИ не «уговорить»
+
+
+def decide(answer: dict, current_status: str | None) -> str:
+    """Что делать после ответа продавца: create — новый заказ и счёт, resend — прислать счёт ещё раз,
+    owner — звать Кирилла (дороже 5000 ₽ или подозрительно дёшево), none — просто разговор.
+    current_status — статус заказа из этой переписки; отданный или возвращённый не мешает заказать новый."""
+    order = answer.get("order") or {}
+    try:
+        stars = int(order.get("stars") or 0)
+    except (TypeError, ValueError):
+        stars = 0
+    if answer.get("stage") != "agreed" or not order:
+        return "none"
+    if current_status == "new":
+        return "resend"
+    if current_status in ("paid", "building", "ready", "failed"):
+        return "none"  # прошлый заказ ещё в работе — второй параллельно не открываем
+    if stars * STAR_RUB > BIG_ORDER_RUB or stars < MIN_STARS:
+        return "owner"
+    return "create"
+
+
 def key(user_id: int) -> str:
     return f"bot:{user_id}"
 
@@ -71,17 +94,17 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     history.append({"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)})
 
-    order_id = dialogs.order_id(key(user.id))
+    current = orders.get(dialogs.order_id(key(user.id)) or 0)
+    action = decide(answer, current["status"] if current else None)
     new_order = None
-    big = answer.get("order") and int(answer["order"].get("stars") or 0) * STAR_RUB > BIG_ORDER_RUB
-    if big:  # дороже 5000 ₽ договаривается Кирилл лично — счёт сами не выставляем
-        answer["stage"] = "need_owner"
-    if answer["stage"] == "agreed" and answer.get("order") and not order_id:
+    if action == "create":
         try:
             new_order = orders.create(answer["order"]["title"], int(answer["order"]["stars"]),
                                       answer["order"].get("spec", ""), kind=answer["order"].get("kind") or "telegram")
         except (KeyError, TypeError, ValueError):
             new_order = None
+    elif action == "owner":
+        answer["stage"] = "need_owner"
     dialogs.save(key(user.id), history, new_order)
 
     for i, part in enumerate(answer["messages"]):
@@ -90,6 +113,8 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(min(6.0, 1.0 + len(part) / 60))
         await update.message.reply_text(part)
 
+    if action == "resend":  # договорились, а счёт закрыли или потеряли — присылаем тот же заново
+        await send_invoice(ctx.bot, update.effective_chat.id, current)
     if new_order:
         order = orders.get(new_order)
         if order["spec"]:

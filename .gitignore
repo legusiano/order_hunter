@@ -4,3 +4,4 @@ __pycache__/
 orders.db
 cashier.log
 builds/
+cashier.log.1

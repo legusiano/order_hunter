@@ -13,6 +13,7 @@
 
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -21,7 +22,7 @@ from pathlib import Path
 import psycopg
 from dotenv import load_dotenv
 from telegram import LabeledPrice, Update
-from telegram.error import TelegramError
+from telegram.error import NetworkError, TelegramError, TimedOut
 from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler,
                           PreCheckoutQueryHandler, filters)
 
@@ -171,6 +172,22 @@ async def evening_summary(app: Application):
         await asyncio.sleep(300)
 
 
+async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE):
+    """Обрывы связи с Telegram (в РФ бывают часто) — одна строка в журнал, библиотека сама переподключится.
+    Настоящая ошибка в обработке сообщения — владельцу, чтобы клиент не остался без ответа незаметно."""
+    if isinstance(ctx.error, (NetworkError, TimedOut)):
+        log.warning("сеть: %r", ctx.error)
+        return
+    log.error("ошибка при обработке", exc_info=ctx.error)
+    who = ""
+    if isinstance(update, Update) and update.effective_user:
+        who = f" (пользователь {update.effective_user.id})"
+    try:
+        await ctx.bot.send_message(OWNER, f"⚠️ Ошибка в боте{who}: {ctx.error!r}"[:1000])
+    except TelegramError:
+        pass
+
+
 async def heartbeat():
     """Раз в 5 минут — пульс в базе dz_bot: сторож (dz_bot/watchdog.py) напишет, если компьютер выключен или
     касса упала. Без DATABASE_URL просто не работает."""
@@ -202,8 +219,11 @@ async def start_hunter(app: Application):
 
 
 def main():
+    # журнал не больше 2 МB: cashier.log + одна старая копия, дальше старое стирается само
+    handler = RotatingFileHandler(Path(__file__).parent / "cashier.log", maxBytes=1_000_000, backupCount=1,
+                                  encoding="utf-8")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-                        filename=Path(__file__).parent / "cashier.log", encoding="utf-8")
+                        handlers=[handler])
     logging.getLogger("httpx").setLevel(logging.WARNING)
     app = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).post_init(start_hunter).build()
     app.bot_data["orders"] = Orders()
@@ -227,6 +247,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND & ~filters.User(OWNER),
                                    workshop.on_buyer_text))
     app.add_handler(MessageHandler(filters.ALL, refunded_by_telegram), group=1)
+    app.add_error_handler(on_error)
     app.add_handler(MessageHandler(owner & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND, assist.on_text))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 

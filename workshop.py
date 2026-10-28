@@ -143,6 +143,12 @@ async def clean_old(orders: Orders):
         if row["status"] == "refunded" or (row["paid_at"] or 0) < edge:
             await factory.cleanup(row["id"])
             orders.set_setting(f"cleaned:{row['id']}", row["status"])
+    # дневные счётчики сообщений нужны только сегодня, счётчики найденных заказов — месяц для итогов
+    today = time.strftime("%Y-%m-%d")
+    month_ago = time.strftime("%Y-%m-%d", time.localtime(time.time() - 31 * 86400))
+    orders.conn.execute("DELETE FROM settings WHERE name LIKE 'msgs:%' AND name NOT LIKE ?", (f"%:{today}",))
+    orders.conn.execute("DELETE FROM settings WHERE name LIKE 'found:%' AND name < ?", (f"found:{month_ago}",))
+    orders.conn.commit()
 
 
 async def start_build(app, owner: int, order_id: int, comment: str | None = None, free_fix: bool = False):
