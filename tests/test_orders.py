@@ -94,3 +94,15 @@ def test_day_stats(orders):
     orders.set_status(a, "delivered")
     s = orders.day_stats(0)
     assert s == {"created": 2, "paid": 1, "stars": 700, "delivered": 1, "in_work": 0}
+
+
+def test_due_deliveries(orders):
+    orders.set_setting("deliver_at:5", "100")
+    orders.set_setting("deliver_at:6", "999")
+    orders.set_setting("found:2026-10-28", "3")  # другие настройки не путаются
+    assert orders.due("deliver_at:", 500) == [5]
+
+
+def test_delivery_delay():
+    from workshop import delivery_delay
+    assert delivery_delay(700) == 86400 and delivery_delay(1200) == 2 * 86400

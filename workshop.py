@@ -1,6 +1,7 @@
 """Мастерская в кассе: после оплаты запускает фабрику (factory.py) и отдаёт готового бота заказчику.
 
-- Заказ дешевле REVIEW_FROM звёзд — бот отдаёт архив сам (если автовыдача не выключена /auto off).
+- Заказ дешевле REVIEW_FROM звёзд — бот отдаёт архив сам, но не сразу: через 1–2 дня от оплаты (delivery_delay),
+  правки — через FIX_DELAY; владелец может отдать раньше кнопкой. Выключить автовыдачу — /auto off.
 - Заказ от REVIEW_FROM звёзд — сначала Кириллу с кнопками «Отдать» / «Доработать».
 - После выдачи заказчик видит «Всё отлично» / «Нужно поправить». Правки ИИ разбирает: в рамках ТЗ — бесплатно,
   до FREE_REVISIONS раз; новое, чего в ТЗ не было, — доплата отдельным счётом (заказ с parent_id).
@@ -13,6 +14,8 @@
 import asyncio
 import json
 import logging
+import time
+from datetime import datetime, timedelta, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
@@ -22,9 +25,17 @@ import factory
 from orders import Orders, pay_link
 
 log = logging.getLogger("workshop")
+MSK = timezone(timedelta(hours=3))
 lock = asyncio.Lock()
 REVIEW_FROM = 1500   # с этой суммы Кирилл смотрит бота перед выдачей
 FREE_REVISIONS = 3
+# готового бота отдаём не сразу, а через правдоподобный срок от оплаты (как обещает продавец)
+SMALL_ORDER = 1000   # до этой суммы — 1 день, дороже — 2 дня
+FIX_DELAY = 2 * 3600
+
+
+def delivery_delay(stars: int) -> int:
+    return (1 if stars < SMALL_ORDER else 2) * 86400
 
 CLASSIFY = """Заказчик получил Telegram-бота по ТЗ и пишет, что поправить. Реши, это правка в рамках ТЗ
 (ошибка, не работает, не так, как в ТЗ, мелкие тексты/кнопки) или новая функция, которой в ТЗ не было.
@@ -72,8 +83,27 @@ async def deliver(app, owner: int, order_id: int, note: str = ""):
                     "\n\nВнутри README.md — пошаговая инструкция: как получить токен у @BotFather и запустить бота. "
                     "Если что-то не так — нажмите «Нужно поправить» и опишите, исправим.")
     orders.set_status(order_id, "delivered")
+    orders.set_setting(f"deliver_at:{order_id}", None)
+    orders.set_setting(f"deliver_note:{order_id}", None)
     if base != order_id:
         orders.set_status(base, "delivered")
+
+
+async def delivery_loop(app, owner: int):
+    """Раз в 5 минут отдаёт заказы, у которых наступил срок выдачи."""
+    orders: Orders = app.bot_data["orders"]
+    while True:
+        for order_id in orders.due("deliver_at:", int(time.time())):
+            if orders.get(order_id)["status"] != "ready":  # вернули звёзды, отдали вручную — снимаем из очереди
+                orders.set_setting(f"deliver_at:{order_id}", None)
+                continue
+            try:
+                await deliver(app, owner, order_id, orders.setting(f"deliver_note:{order_id}") or "")
+                await app.bot.send_message(owner, f"🎁 Заказ №{order_id} отдан заказчику по сроку.")
+            except TelegramError as e:
+                orders.set_setting(f"deliver_at:{order_id}", None)
+                await app.bot.send_message(owner, f"⚠️ Заказ №{order_id} не отдан по сроку: {e}")
+        await asyncio.sleep(300)
 
 
 async def start_build(app, owner: int, order_id: int, comment: str | None = None, free_fix: bool = False):
@@ -114,13 +144,16 @@ async def start_build(app, owner: int, order_id: int, comment: str | None = None
 
         auto = orders.setting("auto_deliver") != "off"
         if order["buyer_id"] and auto and total < REVIEW_FROM:
-            note = f"🔧 Готово, поправили: {comment}"[:500] if comment else ""
-            try:
-                await deliver(app, owner, order_id, note)
-            except TelegramError as e:
-                await progress(f"{report}\n⚠️ Не отдал: {e}")
-                return
-            await progress(report + "\n🎁 Отдал заказчику автоматически.")
+            paid_at = order["paid_at"] or int(time.time())
+            due = int(time.time()) + FIX_DELAY if comment else paid_at + delivery_delay(total)
+            orders.set_setting(f"deliver_at:{order_id}", str(due))
+            if comment:
+                orders.set_setting(f"deliver_note:{order_id}", f"🔧 Готово, поправили: {comment}"[:500])
+            when = datetime.fromtimestamp(due, MSK).strftime("%d.%m %H:%M")
+            await progress(report + f"\n⏳ Отдам заказчику автоматически {when} МСК. Отдать сразу — кнопка ниже.")
+            with open(result["zip"], "rb") as f:
+                await app.bot.send_document(owner, f, filename=f"bot_order_{base}.zip",
+                                            reply_markup=owner_buttons(order_id))
             return
         with open(result["zip"], "rb") as f:
             await app.bot.send_document(owner, f, filename=f"bot_order_{base}.zip",

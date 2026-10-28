@@ -109,6 +109,11 @@ class Orders:
         self.conn.commit()
         return self.get(order_id)["revisions"]
 
+    def due(self, prefix: str, now: int) -> list[int]:
+        """Номера заказов из настроек вида «<prefix><номер>» = время, которое уже наступило."""
+        rows = self.conn.execute("SELECT name, value FROM settings WHERE name LIKE ?", (prefix + "%",)).fetchall()
+        return sorted(int(r[0][len(prefix):]) for r in rows if int(r[1]) <= now)
+
     def setting(self, name: str) -> str | None:
         row = self.conn.execute("SELECT value FROM settings WHERE name = ?", (name,)).fetchone()
         return row[0] if row else None
