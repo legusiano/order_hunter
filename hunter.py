@@ -25,7 +25,7 @@ OWNER_CHAT = int(os.getenv("OWNER_CHAT_ID", "2093180872"))
 CHANNELS = ["freelancetaverna", "workk_on", "FrWork3", "FreeWorkFeed", "allgigs", "devjobs", "frilancekomfort",
             "job_python", "vakansii_it", "work_finde", "normrabota", "remote_w0rk", "dddwork", "digitaltender",
             "Getitrussia", "dnative_job", "evacuatejobs", "jobforjunior", "morejobs", "onlinevakansii", "rabotka_zdes",
-            "yuniorapp", "javascript_jobs_feed", "zakazy_it", "freelance_zakazy", "jobbyrussia", "chooseajob"]
+            "yuniorapp", "javascript_jobs_feed", "zakazy_it", "freelance_zakazy", "jobbyrussia", "chooseajob", "FreelanceBay"]
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"}
 MAX_PER_RUN = 10
 FIRST_RUN = 5
