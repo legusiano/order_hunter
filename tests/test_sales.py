@@ -17,3 +17,7 @@ def test_resend_and_repeat_customers():
     assert decide(agreed(900), "building") == "none"       # прошлый ещё в работе
     assert decide(agreed(900), "delivered") == "create"    # постоянный клиент заказывает второго бота
     assert decide(agreed(900), "refunded") == "create"
+
+
+def test_minimum_is_300_stars():
+    assert decide(agreed(300), None) == "create" and decide(agreed(299), None) == "owner"

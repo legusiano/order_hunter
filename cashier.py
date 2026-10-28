@@ -12,9 +12,11 @@
 """
 
 import asyncio
+import ctypes
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -206,8 +208,21 @@ async def heartbeat():
         await asyncio.sleep(300)
 
 
+def keep_awake():
+    """Пока касса работает — просим Windows не уходить в ожидание (как видеоплеер во время фильма). На ноутбуке
+    Кирилла «современный режим ожидания»: через 3 часа гаснет экран, ноутбук засыпает, и бот молчит.
+    Системные настройки не меняются: просьба снимается сама, когда касса закрыта."""
+    if sys.platform != "win32":
+        return
+    ES_CONTINUOUS, ES_SYSTEM_REQUIRED, ES_DISPLAY_REQUIRED = 0x80000000, 0x00000001, 0x00000002
+    # ES_DISPLAY_REQUIRED обязателен: в Modern Standby ожидание начинается именно с погасшего экрана
+    if not ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED):
+        log.warning("Windows не приняла просьбу не засыпать")
+
+
 async def start_hunter(app: Application):
     orders: Orders = app.bot_data["orders"]
+    keep_awake()
     app.create_task(heartbeat())
 
     def found(n: int):
