@@ -4,6 +4,8 @@
 
 import re
 
+import kinds
+
 STEPS = """📘 Как запустить бота — по шагам, даже если вы никогда этого не делали
 
 1️⃣ Токен бота
@@ -65,7 +67,8 @@ def variables(env_example: str) -> list[tuple[str, str]]:
     return result
 
 
-def build(env_example: str) -> str:
+def build(env_example: str, kind: str = "telegram") -> str:
+    """Инструкция для своего типа проекта: Telegram, Discord, VK, плагин Minecraft, скрипты Roblox."""
     items = variables(env_example) or [("BOT_TOKEN", HINTS["BOT_TOKEN"]), ("ADMIN_IDS", HINTS["ADMIN_IDS"])]
     lines = "\n".join(f"   {name}=… — {hint}" for name, hint in items)
-    return STEPS.format(variables=lines)
+    return kinds.GUIDES.get(kind, STEPS).format(variables=lines)

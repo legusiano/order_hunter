@@ -106,7 +106,8 @@ async def deliver(app, owner: int, order_id: int, note: str = ""):
             caption=(note or f"🎉 Ваш бот готов! Заказ №{base}: {orders.get(base)['title']}") +
                     "\n\nНиже — подробная инструкция, как его запустить. "
                     "Если что-то не так — нажмите «Нужно поправить» и опишите, исправим.")
-    await app.bot.send_message(order["buyer_id"], guide.build(build_file(base, ".env.example")))
+    await app.bot.send_message(order["buyer_id"], guide.build(build_file(base, ".env.example"),
+                                                              orders.get(base)["kind"]))
     orders.set_status(order_id, "delivered")
     orders.set_setting(f"deliver_at:{order_id}", None)
     orders.set_setting(f"deliver_note:{order_id}", None)
@@ -160,7 +161,8 @@ async def start_build(app, owner: int, order_id: int, comment: str | None = None
         await progress("🛠 доработка начата…" if comment else "🛠 начал собирать бота по ТЗ…")
         try:
             base_order = orders.get(base)
-            result = await factory.build(base, base_order["title"], base_order["spec"], progress, comment)
+            result = await factory.build(base, base_order["title"], base_order["spec"], progress, comment,
+                                         kind=base_order["kind"])
         except Exception as e:  # BuildError, git, gh, сеть — касса не должна падать из-за фабрики
             log.exception("сборка заказа %s", order_id)
             orders.set_status(order_id, "failed")

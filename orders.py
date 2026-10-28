@@ -39,16 +39,19 @@ class Orders:
         columns = {r[1] for r in self.conn.execute("PRAGMA table_info(orders)")}
         # колонки, появившиеся вместе с фабрикой, — старые базы дополняем
         for name, ddl in (("spec", "TEXT NOT NULL DEFAULT ''"), ("revisions", "INTEGER NOT NULL DEFAULT 0"),
-                          ("parent_id", "INTEGER")):  # parent_id — доплата за доработку к этому заказу
+                          ("parent_id", "INTEGER"),  # parent_id — доплата за доработку к этому заказу
+                          ("kind", "TEXT NOT NULL DEFAULT 'telegram'")):  # тип проекта, см. kinds.py
             if name not in columns:
                 self.conn.execute(f"ALTER TABLE orders ADD COLUMN {name} {ddl}")
         self.conn.commit()
 
-    def create(self, title: str, stars: int, spec: str = "", parent_id: int | None = None) -> int:
+    def create(self, title: str, stars: int, spec: str = "", parent_id: int | None = None,
+               kind: str = "telegram") -> int:
         if stars < 1 or not title.strip():
             raise ValueError("нужны название и цена от 1 звезды")
-        cur = self.conn.execute("INSERT INTO orders (title, stars, spec, parent_id, created_at) VALUES (?, ?, ?, ?, ?)",
-                                (title.strip()[:200], stars, spec.strip(), parent_id, int(time.time())))
+        cur = self.conn.execute(
+            "INSERT INTO orders (title, stars, spec, parent_id, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (title.strip()[:200], stars, spec.strip(), parent_id, kind, int(time.time())))
         self.conn.commit()
         return cur.lastrowid
 

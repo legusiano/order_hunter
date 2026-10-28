@@ -28,7 +28,7 @@ def test_merge_and_delete():
 
 
 def test_missing_required_files():
-    assert "tests/test_*.py" in missing({"bot/__main__.py": ""})
+    assert "tests/*.py" in missing({"bot/__main__.py": ""})
     full = {p: "" for p in ["requirements.txt", "README.md", ".env.example", "bot/__init__.py", "bot/__main__.py",
                              "tests/test_logic.py"]}
     assert missing(full) == []
@@ -55,3 +55,10 @@ def test_cleanup_removes_local_files(tmp_path, monkeypatch):
     asyncio.run(factory.cleanup(7))
     assert not (tmp_path / "order_7").exists() and not (tmp_path / "order_7.zip").exists()
     assert ("git", "push", "-q", "origin", "--delete", "order-7-1", "order-7-2-fix123") in calls
+
+
+def test_missing_by_kind():
+    plugin = {"pom.xml": "", "README.md": "", "src/main/resources/plugin.yml": "", "src/main/java/me/kirill/Main.java": ""}
+    assert missing(plugin, "minecraft") == []
+    assert missing({"README.md": "", "src/server/Shop.server.luau": ""}, "roblox") == []
+    assert missing({"README.md": ""}, "roblox") == ["src/*.luau"]

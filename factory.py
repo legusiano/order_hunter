@@ -17,41 +17,28 @@ import time
 import zipfile
 from pathlib import Path
 
+import kinds
 import seller
 
 ROOT = Path(__file__).parent
 BUILDS = ROOT / "builds"                       # локальные копии: builds/order_<id>/ и builds/order_<id>.zip
 REPO = Path(r"C:\Users\USER\Desktop\bot_builds")  # клон legusiano/bot_builds, откуда пушатся ветки на проверку
 ATTEMPTS = 3
-REQUIRED = ["requirements.txt", "README.md", ".env.example", "bot/__init__.py", "bot/__main__.py"]
+PROMPT = """Ты — сильный разработчик. Напиши готовый к запуску проект — {title} — строго по ТЗ.
 
-PROMPT = """Ты — сильный Python-разработчик Telegram-ботов. Напиши готовый к запуску проект бота строго по ТЗ.
-
-Стек и правила:
-- Python 3.11, python-telegram-bot 22 (async, Application.builder().token(...).build(), run_polling()).
-- Хранение — SQLite (sqlite3 из стандартной библиотеки), файл data/bot.db, папку создавай сам.
-- Настройки только из окружения через python-dotenv: BOT_TOKEN, ADMIN_IDS (id через запятую) и что ещё нужно по ТЗ.
-- Пакет bot/: bot/__main__.py запускает бота (python -m bot); bot/__init__.py пустой или с версией.
-  Логику (база, расчёты, тексты, проверки) вынеси в отдельные модули без обращения к сети — их покрывают тесты.
-- ВАЖНО: импорт пакета bot и его модулей не должен ничего запускать и не должен ходить в сеть (только при python -m bot).
-- tests/: pytest-тесты на логику (база во временном файле или :memory:), не меньше 5 тестов, без сети и без токена.
-- requirements.txt с версиями: python-telegram-bot>=22,<23 и python-dotenv; другое — только если без этого никак.
-  Если используешь application.job_queue — пиши python-telegram-bot[job-queue]>=22,<23, иначе job_queue будет None.
-- Бот обязан отвечать на /start (приветствие и главное меню) — его запускают против тестового Telegram и шлют /start.
-- .env.example со всеми переменными и комментариями на русском.
-- README.md на русском для заказчика без опыта: что умеет бот (пункты ТЗ), как получить токен у @BotFather,
-  как запустить на Windows и на Linux-сервере (python -m venv, pip install -r requirements.txt, python -m bot),
-  как держать бота запущенным на сервере (systemd-юнит в README).
-- Интерфейс бота — на русском, кнопки (InlineKeyboard/ReplyKeyboard) там, где это удобно пользователю.
-- Админские функции — только для ADMIN_IDS.
-- Если в ТЗ есть оплата — звёзды Telegram (currency="XTR", без provider_token).
-- Без заглушек и TODO: всё из ТЗ должно работать.
-
+Стек и правила:{stack}
+{common}
 Ответ — только файлы в таком формате, без пояснений до и после:
 === FILE: путь/к/файлу ===
 содержимое
 === END ===
 """
+
+
+def prompt(kind: str) -> str:
+    info = kinds.get(kind)
+    return PROMPT.format(title=info["title"], stack=info["stack"], common=kinds.COMMON)
+
 
 FIX = """Проверка в чистой машине упала. Вот лог (конец):
 {log}
@@ -91,15 +78,23 @@ def merge(files: dict[str, str], changes: dict[str, str]) -> dict[str, str]:
     return result
 
 
-def missing(files: dict[str, str]) -> list[str]:
-    absent = [p for p in REQUIRED if p not in files]
-    if not any(p.startswith("tests/") and p.endswith(".py") for p in files):
-        absent.append("tests/test_*.py")
+def missing(files: dict[str, str], kind: str = "telegram") -> list[str]:
+    """Обязательные файлы типа проекта; «папка/*.расширение» — хотя бы один такой файл где-то в этой папке."""
+    absent = []
+    for pattern in kinds.get(kind)["required"]:
+        if "*" in pattern:
+            folder, ext = pattern.split("*", 1)
+            exts = (ext, ".lua") if ext == ".luau" else (ext,)
+            if not any(p.startswith(folder) and p.endswith(exts) for p in files):
+                absent.append(pattern)
+        elif pattern not in files:
+            absent.append(pattern)
     return absent
 
 
-def files_prompt(files: dict[str, str]) -> str:
-    return "\n".join(f"=== FILE: {p} ===\n{c}=== END ===" for p, c in sorted(files.items()))
+def files_prompt(files: dict[str, str | bytes]) -> str:
+    # собранный .jar и прочие двоичные файлы ИИ не показываем
+    return "\n".join(f"=== FILE: {p} ===\n{c}=== END ===" for p, c in sorted(files.items()) if isinstance(c, str))
 
 
 async def ask(messages: list[dict]) -> str:
@@ -128,7 +123,7 @@ async def run(*cmd: str, cwd: Path = REPO, check: bool = True) -> str:
     return out
 
 
-async def check_on_github(branch: str, files: dict[str, str]) -> tuple[bool, str]:
+async def check_on_github(branch: str, files: dict[str, str], kind: str = "telegram") -> tuple[bool, str]:
     """Кладёт файлы в ветку bot_builds, пушит и ждёт проверку. (прошла ли, конец лога при ошибке)."""
     await run("git", "checkout", "-q", "main")
     await run("git", "checkout", "-q", "-B", branch)
@@ -139,6 +134,7 @@ async def check_on_github(branch: str, files: dict[str, str]) -> tuple[bool, str
         target = REPO / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8", newline="\n")
+    (REPO / ".kind").write_text(kind, encoding="utf-8")  # по нему проверка выбирает шаги: Python, Java или Luau
     await run("git", "add", "-A")
     await run("git", "commit", "-q", "-m", f"{branch}")
     await run("git", "push", "-q", "-f", "origin", branch)
@@ -153,6 +149,13 @@ async def check_on_github(branch: str, files: dict[str, str]) -> tuple[bool, str
         if mine and mine[0]["status"] == "completed":
             run_id = mine[0]["databaseId"]
             if mine[0]["conclusion"] == "success":
+                if kind == "minecraft":  # готовый .jar собран на GitHub — забираем его в архив заказчику
+                    files_dir = BUILDS / "_jar"
+                    shutil.rmtree(files_dir, ignore_errors=True)
+                    await run("gh", "run", "download", str(run_id), "-n", "build", "-D", str(files_dir), check=False)
+                    for jar in files_dir.glob("*.jar"):
+                        files[f"dist/{jar.name}"] = jar.read_bytes()
+                    shutil.rmtree(files_dir, ignore_errors=True)
                 return True, ""
             break
     if run_id is None:
@@ -177,7 +180,10 @@ def save(order_id: int, files: dict[str, str]):
         shutil.rmtree(folder)
     for path, content in files.items():
         (folder / path).parent.mkdir(parents=True, exist_ok=True)
-        (folder / path).write_text(content, encoding="utf-8", newline="\n")
+        if isinstance(content, bytes):
+            (folder / path).write_bytes(content)
+        else:
+            (folder / path).write_text(content, encoding="utf-8", newline="\n")
     (BUILDS / f"order_{order_id}.zip").write_bytes(package(files))
 
 
@@ -194,12 +200,21 @@ async def cleanup(order_id: int):
         await run("git", "gc", "-q", "--prune=now", check=False)
 
 
-def load(order_id: int) -> dict[str, str]:
+def load(order_id: int) -> dict[str, str | bytes]:
     folder = BUILDS / f"order_{order_id}"
-    return {p.relative_to(folder).as_posix(): p.read_text(encoding="utf-8") for p in folder.rglob("*") if p.is_file()}
+    files = {}
+    for p in folder.rglob("*"):
+        if p.is_file():
+            data = p.read_bytes()
+            try:
+                files[p.relative_to(folder).as_posix()] = data.decode("utf-8")
+            except UnicodeDecodeError:
+                files[p.relative_to(folder).as_posix()] = data
+    return files
 
 
-async def build(order_id: int, title: str, spec: str, progress=None, comment: str | None = None) -> dict:
+async def build(order_id: int, title: str, spec: str, progress=None, comment: str | None = None,
+                kind: str = "telegram") -> dict:
     """Собирает (или дорабатывает по comment) бота. Возвращает {"files", "zip", "attempts", "tests"}."""
     async def say(text: str):
         if progress:
@@ -208,30 +223,30 @@ async def build(order_id: int, title: str, spec: str, progress=None, comment: st
     task = f"Заказ: {title}\n\nТЗ:\n{spec or title}"
     if comment:
         files = load(order_id)
-        messages = [{"role": "system", "content": PROMPT}, {"role": "user", "content": task},
+        messages = [{"role": "system", "content": prompt(kind)}, {"role": "user", "content": task},
                     {"role": "assistant", "content": files_prompt(files)},
                     {"role": "user", "content": REVISE.format(comment=comment)}]
         files = merge(files, parse_files(await ask(messages)))
     else:
-        messages = [{"role": "system", "content": PROMPT}, {"role": "user", "content": task}]
+        messages = [{"role": "system", "content": prompt(kind)}, {"role": "user", "content": task}]
         files = parse_files(await ask(messages))
 
     suffix = f"-fix{int(time.time()) % 100000}" if comment else ""
     reviewed, attempt, gaps = False, 0, []
     while True:
         attempt += 1
-        if absent := missing(files):
+        if absent := missing(files, kind):
             ok, log = False, "в проекте не хватает файлов: " + ", ".join(absent)
         else:
             await say(f"🔎 Попытка {attempt}: проверяю код на GitHub…")
-            ok, log = await check_on_github(f"order-{order_id}-{attempt}{suffix}", files)
+            ok, log = await check_on_github(f"order-{order_id}-{attempt}{suffix}", files, kind)
         if ok and not reviewed:
             # тесты прошли — второй проход: всё ли из ТЗ сделано. Без этого автовыдача отдала бы «пустышку»
             reviewed = True
             gaps = await review(task, files)
             if gaps:
                 await say("🧐 Самопроверка по ТЗ: доделываю — " + "; ".join(gaps)[:500])
-                messages = [{"role": "system", "content": PROMPT}, {"role": "user", "content": task},
+                messages = [{"role": "system", "content": prompt(kind)}, {"role": "user", "content": task},
                             {"role": "assistant", "content": files_prompt(files)},
                             {"role": "user", "content": REVISE.format(comment="не реализовано по ТЗ: " + "; ".join(gaps))}]
                 files = merge(files, parse_files(await ask(messages)))
@@ -245,7 +260,7 @@ async def build(order_id: int, title: str, spec: str, progress=None, comment: st
             save(order_id, files)  # чтобы можно было доработать вручную
             raise BuildError(f"не собрался за {attempt} попытки. Последняя ошибка:\n{log[-1500:]}")
         await say(f"🔧 Попытка {attempt} не прошла, ИИ исправляет…")
-        messages = [{"role": "system", "content": PROMPT}, {"role": "user", "content": task},
+        messages = [{"role": "system", "content": prompt(kind)}, {"role": "user", "content": task},
                     {"role": "assistant", "content": files_prompt(files)},
                     {"role": "user", "content": FIX.format(log=log[-6000:])}]
         files = merge(files, parse_files(await ask(messages)))

@@ -23,3 +23,9 @@ def test_guide_has_steps_and_variables():
 
 def test_guide_without_env_example():
     assert "BOT_TOKEN=…" in build("")
+
+
+def test_guide_per_kind():
+    assert "Discord Developer" in build("", "discord") or "discord.com/developers" in build("", "discord")
+    assert "plugins" in build("", "minecraft") and "Roblox Studio" in build("", "roblox")
+    assert "BotFather" in build("", "telegram")

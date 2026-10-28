@@ -79,7 +79,7 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if answer["stage"] == "agreed" and answer.get("order") and not order_id:
         try:
             new_order = orders.create(answer["order"]["title"], int(answer["order"]["stars"]),
-                                      answer["order"].get("spec", ""))
+                                      answer["order"].get("spec", ""), kind=answer["order"].get("kind") or "telegram")
         except (KeyError, TypeError, ValueError):
             new_order = None
     dialogs.save(key(user.id), history, new_order)
