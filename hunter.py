@@ -169,8 +169,9 @@ async def send_lead(lead: dict):
         await send(text + (f"\n\nКонтакт: @{username}" if username else ""))
 
 
-async def run_once() -> list[str]:
-    """Один проход: собрать, отфильтровать, прислать новые. Возвращает ошибки источников."""
+async def run_once(on_found=None) -> list[str]:
+    """Один проход: собрать, отфильтровать, прислать новые. Возвращает ошибки источников.
+    on_found(n) — сколько новых заказов прислали (для итога дня в кассе)."""
     leads, errors = await collect()
     first_run = not STATE.exists()
     state = {"seen": []} if first_run else json.loads(STATE.read_text(encoding="utf-8"))
@@ -184,14 +185,16 @@ async def run_once() -> list[str]:
     # помним последние ~2000, чтобы состояние не росло бесконечно
     state["seen"] = (state["seen"] + [lead["id"] for lead in fresh])[-2000:]
     STATE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    if on_found and fresh:
+        on_found(len(fresh))
     return errors
 
 
-async def loop(every: int = 600):
+async def loop(every: int = 600, on_found=None):
     """Охотник внутри кассы на компьютере Кирилла: GitHub по расписанию «раз в 10 минут» запускал раз в час-два."""
     while True:
         try:
-            await run_once()
+            await run_once(on_found)
         except Exception as e:  # сеть, Telegram — следующий проход через 10 минут
             print("охотник:", repr(e))
         await asyncio.sleep(every)

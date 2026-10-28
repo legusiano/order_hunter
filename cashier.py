@@ -11,8 +11,10 @@
 Охотник (hunter.py) шлёт сообщения тем же ботом, но обновления не читает, поэтому они не мешают друг другу.
 """
 
+import asyncio
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -28,6 +30,7 @@ from orders import Dialogs, Orders, pay_link
 
 load_dotenv(Path(__file__).parent / ".env")
 OWNER = int(os.getenv("OWNER_CHAT_ID", "2093180872"))
+MSK = timezone(timedelta(hours=3))
 STATUS = {"new": "🕓 ждёт оплаты", "paid": "✅ оплачен", "building": "🛠 собирается", "ready": "📦 готов, ждёт «Отдать»",
           "failed": "⚠️ не собрался", "delivered": "🎁 отдан", "refunded": "↩️ возврат"}
 log = logging.getLogger("cashier")
@@ -141,8 +144,36 @@ async def refunded_by_telegram(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                                           f"{' — бот уже был отдан' if was_delivered else ''}. Покупатель заблокирован.")
 
 
+def today() -> str:
+    return datetime.now(MSK).strftime("%Y-%m-%d")
+
+
+async def evening_summary(app: Application):
+    """В 21:00 по Москве — итог дня владельцу."""
+    orders: Orders = app.bot_data["orders"]
+    while True:
+        now = datetime.now(MSK)
+        if now.hour >= 21 and orders.setting("summary_day") != today():
+            start = int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+            s = orders.day_stats(start)
+            found = orders.setting(f"found:{today()}") or "0"
+            text = (f"📊 Итог дня\n🎯 Найдено заказов: {found}\n🤝 Договорились: {s['created']}\n"
+                    f"💰 Оплачено: {s['paid']} на {s['stars']} ⭐\n🎁 Отдано: {s['delivered']}")
+            if s["in_work"]:
+                text += f"\n🛠 В работе: {s['in_work']} (/orders)"
+            await app.bot.send_message(OWNER, text)
+            orders.set_setting("summary_day", today())
+        await asyncio.sleep(300)
+
+
 async def start_hunter(app: Application):
-    app.create_task(hunter.loop())  # поиск заказов каждые 10 минут — в этом же процессе
+    orders: Orders = app.bot_data["orders"]
+
+    def found(n: int):
+        orders.set_setting(f"found:{today()}", str(int(orders.setting(f"found:{today()}") or 0) + n))
+
+    app.create_task(hunter.loop(on_found=found))  # поиск заказов каждые 10 минут — в этом же процессе
+    app.create_task(evening_summary(app))
 
 
 def main():

@@ -85,3 +85,12 @@ def test_find_order_by_charge(orders):
     order_id = orders.create("Бот", 100)
     orders.mark_paid(order_id, 7, None, "charge-xyz")
     assert orders.by_charge("charge-xyz")["id"] == order_id and orders.by_charge("nope") is None
+
+
+def test_day_stats(orders):
+    a = orders.create("Бот", 700)
+    orders.create("Бот 2", 900)
+    orders.mark_paid(a, 7, None, "c-day")
+    orders.set_status(a, "delivered")
+    s = orders.day_stats(0)
+    assert s == {"created": 2, "paid": 1, "stars": 700, "delivered": 1, "in_work": 0}

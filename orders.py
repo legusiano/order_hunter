@@ -92,6 +92,18 @@ class Orders:
     def recent(self, limit: int = 15) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
+    def day_stats(self, since: int) -> dict:
+        """Итог с момента since (unix): сколько договорились, оплатили, отдали и что ещё в работе."""
+        one = lambda sql, *a: self.conn.execute(sql, a).fetchone()[0]  # noqa: E731
+        return {
+            "created": one("SELECT COUNT(*) FROM orders WHERE created_at >= ?", since),
+            "paid": one("SELECT COUNT(*) FROM orders WHERE paid_at >= ?", since),
+            "stars": one("SELECT COALESCE(SUM(stars), 0) FROM orders WHERE paid_at >= ? AND status != 'refunded'",
+                         since),
+            "delivered": one("SELECT COUNT(*) FROM orders WHERE status = 'delivered' AND paid_at >= ?", since),
+            "in_work": one("SELECT COUNT(*) FROM orders WHERE status IN ('paid', 'building', 'ready', 'failed')"),
+        }
+
     def add_revision(self, order_id: int) -> int:
         self.conn.execute("UPDATE orders SET revisions = revisions + 1 WHERE id = ?", (order_id,))
         self.conn.commit()
