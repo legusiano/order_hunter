@@ -36,6 +36,8 @@ PROMPT = """Ты — сильный Python-разработчик Telegram-бо�
 - ВАЖНО: импорт пакета bot и его модулей не должен ничего запускать и не должен ходить в сеть (только при python -m bot).
 - tests/: pytest-тесты на логику (база во временном файле или :memory:), не меньше 5 тестов, без сети и без токена.
 - requirements.txt с версиями: python-telegram-bot>=22,<23 и python-dotenv; другое — только если без этого никак.
+  Если используешь application.job_queue — пиши python-telegram-bot[job-queue]>=22,<23, иначе job_queue будет None.
+- Бот обязан отвечать на /start (приветствие и главное меню) — его запускают против тестового Telegram и шлют /start.
 - .env.example со всеми переменными и комментариями на русском.
 - README.md на русском для заказчика без опыта: что умеет бот (пункты ТЗ), как получить токен у @BotFather,
   как запустить на Windows и на Linux-сервере (python -m venv, pip install -r requirements.txt, python -m bot),
