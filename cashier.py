@@ -5,6 +5,7 @@
   /order <звёзды> <что делаем> — создать заказ и получить ссылку на оплату
   /orders — последние заказы
   /refund <id> — вернуть звёзды за заказ
+Плюс режим «переписка через бота» (assist.py): пересланное сообщение заказчика → готовый ответ от ИИ-продавца.
 Охотник (hunter.py) шлёт сообщения тем же ботом, но обновления не читает, поэтому они не мешают друг другу.
 """
 
@@ -18,7 +19,8 @@ from telegram.error import TelegramError
 from telegram.ext import (Application, CommandHandler, ContextTypes, MessageHandler, PreCheckoutQueryHandler,
                           filters)
 
-from orders import Orders, pay_link
+import assist
+from orders import Dialogs, Orders, pay_link
 
 load_dotenv(Path(__file__).parent / ".env")
 OWNER = int(os.getenv("OWNER_CHAT_ID", "2093180872"))
@@ -118,12 +120,18 @@ def main():
     logging.getLogger("httpx").setLevel(logging.WARNING)
     app = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
     app.bot_data["orders"] = Orders()
+    app.bot_data["dialogs"] = Dialogs(app.bot_data["orders"].conn)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("order", new_order))
     app.add_handler(CommandHandler("orders", list_orders))
     app.add_handler(CommandHandler("refund", refund))
     app.add_handler(PreCheckoutQueryHandler(precheckout))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, paid))
+    owner = filters.User(OWNER) & filters.ChatType.PRIVATE
+    app.add_handler(CommandHandler("clients", assist.list_clients, filters=owner))
+    app.add_handler(CommandHandler("client", assist.switch_client, filters=owner))
+    app.add_handler(CommandHandler("reset", assist.reset_client, filters=owner))
+    app.add_handler(MessageHandler(owner & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND, assist.on_text))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

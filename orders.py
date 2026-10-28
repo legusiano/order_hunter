@@ -2,6 +2,7 @@
 тот создаёт заказ через create(), отдаёт заказчику pay_link(), а касса принимает звёзды.
 """
 
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -20,6 +21,13 @@ CREATE TABLE IF NOT EXISTS orders (
     created_at INTEGER NOT NULL,
     paid_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS dialogs (
+    client TEXT PRIMARY KEY,          -- id или имя заказчика, с которым переписывается Кирилл
+    history TEXT NOT NULL,            -- JSON для ИИ-продавца: [{"role": "user"|"assistant", "content": ...}]
+    order_id INTEGER,                 -- заказ, созданный по этой переписке
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
 
@@ -65,6 +73,47 @@ class Orders:
 
     def recent(self, limit: int = 15) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+class Dialogs:
+    """Переписки с заказчиками для режима «пересылаю сообщение — бот подсказывает ответ». Живут в том же файле."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    def history(self, client: str) -> list[dict]:
+        row = self.conn.execute("SELECT history FROM dialogs WHERE client = ?", (client,)).fetchone()
+        return json.loads(row["history"]) if row else []
+
+    def save(self, client: str, history: list[dict], order_id: int | None = None):
+        self.conn.execute(
+            "INSERT INTO dialogs (client, history, order_id, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(client) DO "
+            "UPDATE SET history = excluded.history, order_id = COALESCE(excluded.order_id, dialogs.order_id), "
+            "updated_at = excluded.updated_at",
+            (client, json.dumps(history[-40:], ensure_ascii=False), order_id, int(time.time())))
+        self.conn.commit()
+
+    def order_id(self, client: str) -> int | None:
+        row = self.conn.execute("SELECT order_id FROM dialogs WHERE client = ?", (client,)).fetchone()
+        return row["order_id"] if row else None
+
+    def reset(self, client: str):
+        self.conn.execute("DELETE FROM dialogs WHERE client = ?", (client,))
+        self.conn.commit()
+
+    def recent(self, limit: int = 10) -> list[str]:
+        return [r[0] for r in self.conn.execute("SELECT client FROM dialogs ORDER BY updated_at DESC LIMIT ?",
+                                                (limit,))]
+
+    # с кем сейчас переписка: к нему относятся сообщения, вставленные без пересылки
+    def active(self) -> str | None:
+        row = self.conn.execute("SELECT value FROM settings WHERE name = 'active_client'").fetchone()
+        return row[0] if row else None
+
+    def set_active(self, client: str):
+        self.conn.execute("INSERT INTO settings (name, value) VALUES ('active_client', ?) ON CONFLICT(name) DO "
+                          "UPDATE SET value = excluded.value", (client,))
+        self.conn.commit()
 
 
 def pay_link(bot_username: str, order_id: int) -> str:
