@@ -37,3 +37,21 @@ def test_missing_required_files():
 def test_package_is_zip():
     data = package({"bot/__init__.py": "", "README.md": "# Бот\n"})
     assert data[:2] == b"PK"
+
+
+def test_cleanup_removes_local_files(tmp_path, monkeypatch):
+    import asyncio
+    import factory
+    monkeypatch.setattr(factory, "BUILDS", tmp_path)
+    calls = []
+
+    async def fake_run(*cmd, **kw):
+        calls.append(cmd)
+        return "order-7-1\norder-7-2-fix123\n" if cmd[:2] == ("git", "branch") and "--list" in cmd else ""
+    monkeypatch.setattr(factory, "run", fake_run)
+    (tmp_path / "order_7" / "bot").mkdir(parents=True)
+    (tmp_path / "order_7" / "bot" / "__main__.py").write_text("x", encoding="utf-8")
+    (tmp_path / "order_7.zip").write_bytes(b"PK")
+    asyncio.run(factory.cleanup(7))
+    assert not (tmp_path / "order_7").exists() and not (tmp_path / "order_7.zip").exists()
+    assert ("git", "push", "-q", "origin", "--delete", "order-7-1", "order-7-2-fix123") in calls

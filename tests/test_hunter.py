@@ -68,4 +68,5 @@ def test_budget():
 
 def test_any_bot_platform_now_ok():
     assert matches("Нужен бот для VK", "бюджет 3000, пишите @me")
-    assert not matches("Нужен бот для Roblox", "бюджет 3000")
+    assert matches("Нужен бот для Roblox-группы", "бюджет 3000, пишите @me")  # игры теперь берём
+    assert not matches("Нужен чит-бот автофарм для Roblox", "бюджет 3000")  # а читы — нет

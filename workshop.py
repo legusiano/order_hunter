@@ -34,6 +34,7 @@ FREE_REVISIONS = 3
 # готового бота отдаём не сразу, а через правдоподобный срок от оплаты (как обещает продавец)
 SMALL_ORDER = 1000   # до этой суммы — 1 день, дороже — 2 дня
 FIX_DELAY = 2 * 3600
+KEEP_DAYS = 14       # столько храним отданный заказ на случай правок, потом удаляем с компьютера
 
 
 def delivery_delay(stars: int) -> int:
@@ -127,7 +128,20 @@ async def delivery_loop(app, owner: int):
             except TelegramError as e:
                 orders.set_setting(f"deliver_at:{order_id}", None)
                 await app.bot.send_message(owner, f"⚠️ Заказ №{order_id} не отдан по сроку: {e}")
+        await clean_old(orders)
         await asyncio.sleep(300)
+
+
+async def clean_old(orders: Orders):
+    """Отдали больше KEEP_DAYS дней назад и заказчик молчит, или звёзды вернули, — чистим файлы с компьютера."""
+    edge = int(time.time()) - KEEP_DAYS * 86400
+    for row in orders.conn.execute("SELECT id, status, paid_at FROM orders WHERE parent_id IS NULL AND "
+                                   "status IN ('delivered', 'refunded')").fetchall():
+        if orders.setting(f"cleaned:{row['id']}"):
+            continue
+        if row["status"] == "refunded" or (row["paid_at"] or 0) < edge:
+            await factory.cleanup(row["id"])
+            orders.set_setting(f"cleaned:{row['id']}", row["status"])
 
 
 async def start_build(app, owner: int, order_id: int, comment: str | None = None, free_fix: bool = False):
@@ -225,9 +239,12 @@ async def on_buyer_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     if action == "ok":
         orders.set_setting(f"await_help:{q.from_user.id}", None)
+        orders.set_setting(f"await_change:{q.from_user.id}", None)
         await q.edit_message_reply_markup(None)
         await q.message.reply_text("Спасибо! Рады, что всё работает 🙌 Если понадобится что-то ещё — пишите.")
-        await ctx.bot.send_message(owner, f"⭐ Заказчик доволен заказом №{order_id}.")
+        await factory.cleanup(order_id)  # заказ принят — файлы с компьютера больше не нужны
+        orders.set_setting(f"cleaned:{order_id}", "accepted")
+        await ctx.bot.send_message(owner, f"⭐ Заказчик доволен заказом №{order_id}. Файлы заказа удалены с компьютера.")
         return
     orders.set_setting(f"await_change:{q.from_user.id}", str(order_id))
     await q.message.reply_text("Опишите одним сообщением, что поправить или что не работает — чем подробнее, "

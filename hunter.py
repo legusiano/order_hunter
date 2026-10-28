@@ -68,9 +68,12 @@ def clean(text: str) -> str:
 # «нужен бот на пайтон» без слова «телеграм» — тоже наше; а вот боты для других площадок и железа — нет
 ANY_BOT = re.compile(r"чат.?бот|\bбот(а|у|ом|ов|ы)?\b|\bbot\b|mini ?app|мини.?апп|мини.?прилож|ии.?ассистент|"
                      r"ai.?ассистент|ии.?агент|ai.?agent|ии.?менеджер", re.I)
-# берём любых ботов (Telegram, VK, WhatsApp, Discord, для сайта); не берём игровых ботов, железо и «накрутку»
-OTHER_PLATFORM = re.compile(r"raspberry|роблокс|roblox|майнкрафт|minecraft|black russia|\bsamp\b|\bgta\b|android|"
-                            r"\badb\b|игров|дзен|ютуб|youtube|накрут|просмотр", re.I)
+# берём любых ботов (Telegram, VK, WhatsApp, Discord, сайт, игры — Roblox, Minecraft…); не берём то, за что банят:
+# читы, автофарм, автоматизацию чужих аккаунтов, накрутку
+OTHER_PLATFORM = re.compile(r"\bчит|cheat|автофарм|auto.?farm|aimbot|аимбот|макрос для игр|накрут|просмотр|"
+                            r"фарм аккаунт|абуз|обход (бана|античит)|raspberry|android|\badb\b|"
+                            # «бот для автоматизированной работы» на RP-серверах — та же автоигра
+                            r"black russia|\bsamp\b|\bgta\b|автоматизированн\w* работ", re.I)
 # бюджет из текста заказа, чтобы крупные (от BIG_BUDGET ₽) отдавать Кириллу лично
 BUDGET = re.compile(r"(\d[\d  .,]*)\s*(тыс|к\b|k\b|₽|руб|р\.|rub)", re.I)
 BIG_BUDGET = 5000

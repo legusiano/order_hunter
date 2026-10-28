@@ -181,6 +181,19 @@ def save(order_id: int, files: dict[str, str]):
     (BUILDS / f"order_{order_id}.zip").write_bytes(package(files))
 
 
+async def cleanup(order_id: int):
+    """Заказ закрыт: удаляем с компьютера папку, архив и ветки сборки (локальные и на GitHub), чтобы не копилось."""
+    shutil.rmtree(BUILDS / f"order_{order_id}", ignore_errors=True)
+    (BUILDS / f"order_{order_id}.zip").unlink(missing_ok=True)
+    branches = (await run("git", "branch", "--list", f"order-{order_id}-*", check=False)).split()
+    branches = [b for b in branches if b.startswith(f"order-{order_id}-")]
+    if branches:
+        await run("git", "checkout", "-q", "main", check=False)
+        await run("git", "branch", "-D", *branches, check=False)
+        await run("git", "push", "-q", "origin", "--delete", *branches, check=False)
+        await run("git", "gc", "-q", "--prune=now", check=False)
+
+
 def load(order_id: int) -> dict[str, str]:
     folder = BUILDS / f"order_{order_id}"
     return {p.relative_to(folder).as_posix(): p.read_text(encoding="utf-8") for p in folder.rglob("*") if p.is_file()}
