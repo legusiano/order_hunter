@@ -14,9 +14,11 @@
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import psycopg
 from dotenv import load_dotenv
 from telegram import LabeledPrice, Update
 from telegram.error import TelegramError
@@ -169,8 +171,27 @@ async def evening_summary(app: Application):
         await asyncio.sleep(300)
 
 
+async def heartbeat():
+    """Раз в 5 минут — пульс в базе dz_bot: сторож (dz_bot/watchdog.py) напишет, если компьютер выключен или
+    касса упала. Без DATABASE_URL просто не работает."""
+    url = os.getenv("DATABASE_URL")
+
+    def beat():  # асинхронный psycopg на Windows не работает с циклом событий Telegram — пишем в отдельном потоке
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("INSERT INTO settings (name, value) VALUES ('cashier_heartbeat', %s) ON CONFLICT (name) "
+                         "DO UPDATE SET value = EXCLUDED.value", (str(int(time.time())),))
+
+    while url:
+        try:
+            await asyncio.to_thread(beat)
+        except Exception:
+            log.exception("не удалось записать пульс")
+        await asyncio.sleep(300)
+
+
 async def start_hunter(app: Application):
     orders: Orders = app.bot_data["orders"]
+    app.create_task(heartbeat())
 
     def found(n: int):
         orders.set_setting(f"found:{today()}", str(int(orders.setting(f"found:{today()}") or 0) + n))
