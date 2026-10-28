@@ -5,6 +5,7 @@
   /order <звёзды> <что делаем> — создать заказ и получить ссылку на оплату
   /orders — последние заказы
   /refund <id> — вернуть звёзды за заказ
+После оплаты — фабрика собирает бота (workshop.py, factory.py), владельцу приходит архив с «Отдать» / «Доработать».
 Плюс режим «переписка через бота» (assist.py): пересланное сообщение заказчика → готовый ответ от ИИ-продавца.
 Охотник (hunter.py) шлёт сообщения тем же ботом, но обновления не читает, поэтому они не мешают друг другу.
 """
@@ -16,15 +17,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telegram import LabeledPrice, Update
 from telegram.error import TelegramError
-from telegram.ext import (Application, CommandHandler, ContextTypes, MessageHandler, PreCheckoutQueryHandler,
-                          filters)
+from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler,
+                          PreCheckoutQueryHandler, filters)
 
 import assist
+import workshop
 from orders import Dialogs, Orders, pay_link
 
 load_dotenv(Path(__file__).parent / ".env")
 OWNER = int(os.getenv("OWNER_CHAT_ID", "2093180872"))
-STATUS = {"new": "🕓 ждёт оплаты", "paid": "✅ оплачен", "refunded": "↩️ возврат"}
+STATUS = {"new": "🕓 ждёт оплаты", "paid": "✅ оплачен", "building": "🛠 собирается", "ready": "📦 готов, ждёт «Отдать»",
+          "failed": "⚠️ не собрался", "delivered": "🎁 отдан", "refunded": "↩️ возврат"}
 log = logging.getLogger("cashier")
 
 
@@ -67,6 +70,7 @@ async def paid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Оплата получена, спасибо! 🙌 Приступаем к работе и напишем, когда бот будет готов.")
     who = f"@{user.username}" if user.username else f"id {user.id}"
     await ctx.bot.send_message(OWNER, f"💰 Заказ №{order_id} оплачен: {pay.total_amount} ⭐ от {who}")
+    ctx.application.create_task(workshop.start_build(ctx.application, OWNER, order_id))
 
 
 async def new_order(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -131,6 +135,9 @@ def main():
     app.add_handler(CommandHandler("clients", assist.list_clients, filters=owner))
     app.add_handler(CommandHandler("client", assist.switch_client, filters=owner))
     app.add_handler(CommandHandler("reset", assist.reset_client, filters=owner))
+    app.add_handler(CommandHandler("build", workshop.build_cmd, filters=owner))
+    app.add_handler(CommandHandler("fix", workshop.fix_cmd, filters=owner))
+    app.add_handler(CallbackQueryHandler(workshop.on_button, pattern=r"^(deliver|fix):\d+$"))
     app.add_handler(MessageHandler(owner & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND, assist.on_text))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 

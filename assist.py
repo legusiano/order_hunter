@@ -70,7 +70,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     new_order = None
     if answer["stage"] == "agreed" and answer.get("order") and not order_id:
         try:
-            new_order = orders.create(answer["order"]["title"], int(answer["order"]["stars"]))
+            new_order = orders.create(answer["order"]["title"], int(answer["order"]["stars"]),
+                                      answer["order"].get("spec", ""))
         except (KeyError, TypeError, ValueError):
             new_order = None
     dialogs.save(client, history, new_order)

@@ -3,3 +3,4 @@ state.json
 __pycache__/
 orders.db
 cashier.log
+builds/

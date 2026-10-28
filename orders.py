@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,              -- что делаем, коротко: это видит заказчик в счёте
     stars INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'new',  -- new → paid → refunded
+    status TEXT NOT NULL DEFAULT 'new',  -- new → paid → (building → ready →) delivered | refunded
     buyer_id INTEGER,
     buyer_username TEXT,
     charge_id TEXT UNIQUE,            -- telegram_payment_charge_id, нужен для возврата
@@ -36,12 +36,16 @@ class Orders:
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        columns = {r[1] for r in self.conn.execute("PRAGMA table_info(orders)")}
+        if "spec" not in columns:  # ТЗ появилось вместе с фабрикой — старые базы дополняем
+            self.conn.execute("ALTER TABLE orders ADD COLUMN spec TEXT NOT NULL DEFAULT ''")
+            self.conn.commit()
 
-    def create(self, title: str, stars: int) -> int:
+    def create(self, title: str, stars: int, spec: str = "") -> int:
         if stars < 1 or not title.strip():
             raise ValueError("нужны название и цена от 1 звезды")
-        cur = self.conn.execute("INSERT INTO orders (title, stars, created_at) VALUES (?, ?, ?)",
-                                (title.strip()[:200], stars, int(time.time())))
+        cur = self.conn.execute("INSERT INTO orders (title, stars, spec, created_at) VALUES (?, ?, ?, ?)",
+                                (title.strip()[:200], stars, spec.strip(), int(time.time())))
         self.conn.commit()
         return cur.lastrowid
 
@@ -68,7 +72,10 @@ class Orders:
         return cur.rowcount == 1
 
     def mark_refunded(self, order_id: int):
-        self.conn.execute("UPDATE orders SET status = 'refunded' WHERE id = ?", (order_id,))
+        self.set_status(order_id, "refunded")
+
+    def set_status(self, order_id: int, status: str):
+        self.conn.execute("UPDATE orders SET status = ? WHERE id = ?", (status, order_id))
         self.conn.commit()
 
     def recent(self, limit: int = 15) -> list[sqlite3.Row]:
