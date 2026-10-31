@@ -188,7 +188,8 @@ def save(order_id: int, files: dict[str, str]):
 
 
 async def cleanup(order_id: int):
-    """Заказ закрыт: удаляем с компьютера папку, архив и ветки сборки (локальные и на GitHub), чтобы не копилось."""
+    """Заказ закрыт: удаляем ВСЁ — папку и архив с компьютера, ветки сборки локально и на GitHub, а ещё запуски
+    проверок на GitHub вместе с логами и собранными файлами (.jar), чтобы от заказа не осталось и следа."""
     shutil.rmtree(BUILDS / f"order_{order_id}", ignore_errors=True)
     (BUILDS / f"order_{order_id}.zip").unlink(missing_ok=True)
     branches = (await run("git", "branch", "--list", f"order-{order_id}-*", check=False)).split()
@@ -198,6 +199,11 @@ async def cleanup(order_id: int):
         await run("git", "branch", "-D", *branches, check=False)
         await run("git", "push", "-q", "origin", "--delete", *branches, check=False)
         await run("git", "gc", "-q", "--prune=now", check=False)
+    runs = json.loads(await run("gh", "run", "list", "--limit", "200", "--json", "databaseId,headBranch",
+                                check=False) or "[]")
+    for item in runs:
+        if item["headBranch"].startswith(f"order-{order_id}-"):
+            await run("gh", "run", "delete", str(item["databaseId"]), check=False)
 
 
 def load(order_id: int) -> dict[str, str | bytes]:

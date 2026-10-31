@@ -75,7 +75,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if action == "create":
         try:
             new_order = orders.create(answer["order"]["title"], int(answer["order"]["stars"]),
-                                      answer["order"].get("spec", ""), kind=answer["order"].get("kind") or "telegram")
+                                      answer["order"].get("spec", ""), kind=answer["order"].get("kind") or "telegram",
+                                      express=bool(answer["order"].get("express")))
         except (KeyError, TypeError, ValueError):
             new_order = None
     dialogs.save(client, history, new_order)

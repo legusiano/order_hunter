@@ -70,3 +70,9 @@ def test_any_bot_platform_now_ok():
     assert matches("Нужен бот для VK", "бюджет 3000, пишите @me")
     assert matches("Нужен бот для Roblox-группы", "бюджет 3000, пишите @me")  # игры теперь берём
     assert not matches("Нужен чит-бот автофарм для Roblox", "бюджет 3000")  # а читы — нет
+
+
+def test_one_off_work():
+    assert matches("Нужен парсер Авито в Excel", "бюджет 2000, пишите @me")
+    assert matches("Нужен лендинг для кофейни", "срок 3 дня, @me")
+    assert not matches("Разработка сайтов, скриптов и автоматизации под ключ", "пишите @studio")

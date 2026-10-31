@@ -47,7 +47,11 @@ def test_cleanup_removes_local_files(tmp_path, monkeypatch):
 
     async def fake_run(*cmd, **kw):
         calls.append(cmd)
-        return "order-7-1\norder-7-2-fix123\n" if cmd[:2] == ("git", "branch") and "--list" in cmd else ""
+        if cmd[:2] == ("git", "branch") and "--list" in cmd:
+            return "order-7-1\norder-7-2-fix123\n"
+        if cmd[:3] == ("gh", "run", "list"):
+            return '[{"databaseId": 11, "headBranch": "order-7-1"}, {"databaseId": 12, "headBranch": "order-70-1"}]'
+        return ""
     monkeypatch.setattr(factory, "run", fake_run)
     (tmp_path / "order_7" / "bot").mkdir(parents=True)
     (tmp_path / "order_7" / "bot" / "__main__.py").write_text("x", encoding="utf-8")
@@ -55,6 +59,7 @@ def test_cleanup_removes_local_files(tmp_path, monkeypatch):
     asyncio.run(factory.cleanup(7))
     assert not (tmp_path / "order_7").exists() and not (tmp_path / "order_7.zip").exists()
     assert ("git", "push", "-q", "origin", "--delete", "order-7-1", "order-7-2-fix123") in calls
+    assert ("gh", "run", "delete", "11") in calls and ("gh", "run", "delete", "12") not in calls  # чужой заказ 70 не трогаем
 
 
 def test_missing_by_kind():

@@ -30,6 +30,7 @@ from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, Con
 
 import assist
 import hunter
+import netguard
 import sales
 import workshop
 from orders import Dialogs, Orders, pay_link
@@ -78,9 +79,13 @@ async def paid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.bot_data["orders"].mark_paid(order_id, user.id, user.username, pay.telegram_payment_charge_id):
         return
     order = ctx.bot_data["orders"].get(order_id)
-    days = workshop.delivery_delay(order["stars"]) // 86400 if not order["parent_id"] else 1
-    await update.message.reply_text(f"Оплата получена, спасибо! 🙌 Приступаем к работе — бот будет готов в течение "
-                                    f"{'суток' if days == 1 else f'{days} дней'}, пришлём его сюда.")
+    if order["express"]:
+        when = "в течение 3 часов"
+    else:
+        days = workshop.delivery_delay(order["stars"]) // 86400 if not order["parent_id"] else 1
+        when = "в течение суток" if days == 1 else f"в течение {days} дней"
+    await update.message.reply_text(f"Оплата получена, спасибо! 🙌 Приступаем к работе — всё будет готово {when}, "
+                                    "пришлём сюда.")
     who = f"@{user.username}" if user.username else f"id {user.id}"
     await ctx.bot.send_message(OWNER, f"💰 Заказ №{order_id} оплачен: {pay.total_amount} ⭐ от {who}")
     ctx.application.create_task(workshop.start_build(ctx.application, OWNER, order_id))
@@ -224,6 +229,11 @@ async def start_hunter(app: Application):
     orders: Orders = app.bot_data["orders"]
     keep_awake()
     app.create_task(heartbeat())
+
+    async def notify(text: str):
+        await app.bot.send_message(OWNER, text)
+
+    app.create_task(netguard.loop(notify))  # пропал Wi-Fi — переподключаемся сами
 
     def found(n: int):
         orders.set_setting(f"found:{today()}", str(int(orders.setting(f"found:{today()}") or 0) + n))

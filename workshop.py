@@ -37,7 +37,12 @@ FIX_DELAY = 2 * 3600
 KEEP_DAYS = 14       # столько храним отданный заказ на случай правок, потом удаляем с компьютера
 
 
-def delivery_delay(stars: int) -> int:
+EXPRESS_DELAY = 3 * 3600  # срочный заказ (клиент доплатил ~30%) — через 3 часа
+
+
+def delivery_delay(stars: int, express: bool = False) -> int:
+    if express:
+        return EXPRESS_DELAY
     return (1 if stars < SMALL_ORDER else 2) * 86400
 
 CLASSIFY = """Заказчик получил Telegram-бота по ТЗ и пишет, что поправить. Реши, это правка в рамках ТЗ
@@ -191,7 +196,7 @@ async def start_build(app, owner: int, order_id: int, comment: str | None = None
         auto = orders.setting("auto_deliver") != "off"
         if order["buyer_id"] and auto and total < REVIEW_FROM:
             paid_at = order["paid_at"] or int(time.time())
-            due = int(time.time()) + FIX_DELAY if comment else paid_at + delivery_delay(total)
+            due = int(time.time()) + FIX_DELAY if comment else paid_at + delivery_delay(total, orders.get(base)["express"])
             orders.set_setting(f"deliver_at:{order_id}", str(due))
             if comment:
                 orders.set_setting(f"deliver_note:{order_id}", f"🔧 Готово, поправили: {comment}"[:500])

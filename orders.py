@@ -40,18 +40,19 @@ class Orders:
         # колонки, появившиеся вместе с фабрикой, — старые базы дополняем
         for name, ddl in (("spec", "TEXT NOT NULL DEFAULT ''"), ("revisions", "INTEGER NOT NULL DEFAULT 0"),
                           ("parent_id", "INTEGER"),  # parent_id — доплата за доработку к этому заказу
-                          ("kind", "TEXT NOT NULL DEFAULT 'telegram'")):  # тип проекта, см. kinds.py
+                          ("kind", "TEXT NOT NULL DEFAULT 'telegram'"),  # тип проекта, см. kinds.py
+                          ("express", "INTEGER NOT NULL DEFAULT 0")):  # срочно: выдача через пару часов за доплату
             if name not in columns:
                 self.conn.execute(f"ALTER TABLE orders ADD COLUMN {name} {ddl}")
         self.conn.commit()
 
     def create(self, title: str, stars: int, spec: str = "", parent_id: int | None = None,
-               kind: str = "telegram") -> int:
+               kind: str = "telegram", express: bool = False) -> int:
         if stars < 1 or not title.strip():
             raise ValueError("нужны название и цена от 1 звезды")
         cur = self.conn.execute(
-            "INSERT INTO orders (title, stars, spec, parent_id, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (title.strip()[:200], stars, spec.strip(), parent_id, kind, int(time.time())))
+            "INSERT INTO orders (title, stars, spec, parent_id, kind, express, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (title.strip()[:200], stars, spec.strip(), parent_id, kind, int(express), int(time.time())))
         self.conn.commit()
         return cur.lastrowid
 
