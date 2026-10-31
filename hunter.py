@@ -48,7 +48,10 @@ EXCLUDE = re.compile(r"в штат|полный рабочий день|full.?ti
                      r"на правах рекламы|подписывайтесь|наш курс|вебинар|диджитализация|"
                      # реклама студий и исполнителей — это конкуренты, а не заказчики
                      r"мы (делаем|разрабатываем|создаём|создаем)|наша команда|наши услуги|оставьте заявку|"
-                     r"разработка .{0,60}под ключ", re.I)
+                     r"разработка .{0,60}под ключ|"
+                     # мошеннические «заработки», софт для спама и чужих аккаунтов, взлом/чистка сайтов, SEO
+                     r"газпром|зарабатывать вместе|пассивн\w* доход|инвайт|ивайт|софт для .{0,12}аккаунт|"
+                     r"массов\w* рассыл|вредонос|взлом|\bseo\b|сео.?аудит", re.I)
 # берём только разовые заказы: в посте должно быть видно, что человеку нужно что-то сделать под ключ
 ORDER = re.compile(r"нуж(ен|на|но|ны)|требуется|ищу (исполнител|разработчик|программист|кто)|ищем исполнител|"
                    r"(сделать|создать|разработать|написать|доработать|настроить|разработк\w*) (бот|телеграм|tg|тг|мини|ии)|"
@@ -56,7 +59,7 @@ ORDER = re.compile(r"нуж(ен|на|но|ны)|требуется|ищу (ис
                    r"задача:|за сколько", re.I)
 # заказ не на разработку: в заголовке другая профессия
 ROLE = re.compile(r"копирайтер|сценарист|дизайнер|маркетолог|\bsmm|менеджер|монтаж|рилс|таргет|ассистент руковод|"
-                  r"engineer|инженер|designer", re.I)
+                  r"engineer|инженер|designer|animator|аниматор|помощник по|речев\w* аналитик", re.I)
 
 
 def clean(text: str) -> str:
@@ -129,9 +132,9 @@ async def collect() -> tuple[list[dict], list[str]]:
             else:
                 leads += res
     unique = {lead["id"]: lead for lead in leads}
-    # только заказы с @юзером заказчика: где надо писать на сайте или бирже — не берём
+    # с @юзером — черновик и кнопка «Написать»; без него (отклик на сайте/бирже) — с пометкой и ссылкой на пост
     return [lead for lead in unique.values()
-            if matches(lead["title"], lead["body"], tagged=lead.get("tagged", False)) and contact(lead)], errors
+            if matches(lead["title"], lead["body"], tagged=lead.get("tagged", False))], errors
 
 
 def format_lead(lead: dict) -> str:
@@ -194,7 +197,8 @@ async def send_lead(lead: dict):
     if draft_text:
         await send(f"{text}\n\n✍️ Черновик для @{username}:\n{draft_text}", write_button(username, draft_text))
     else:
-        await send(text + (f"\n\nКонтакт: @{username}" if username else ""))
+        await send(text + (f"\n\nКонтакт: @{username}" if username else
+                           "\n\n🌐 Отклик через сайт/биржу — открой пост по ссылке выше."))
 
 
 async def run_once(on_found=None) -> list[str]:

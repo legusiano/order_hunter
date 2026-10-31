@@ -76,3 +76,9 @@ def test_one_off_work():
     assert matches("Нужен парсер Авито в Excel", "бюджет 2000, пишите @me")
     assert matches("Нужен лендинг для кофейни", "срок 3 дня, @me")
     assert not matches("Разработка сайтов, скриптов и автоматизации под ключ", "пишите @studio")
+
+
+def test_junk_filtered():
+    assert not matches("🚀 Как начать зарабатывать вместе с ГАЗПРОМ", "бот поможет, нужен только телефон")
+    assert not matches("Софт для тг аккаунтов", "нужен инвайтинг и массовая рассылка", tagged=True)
+    assert matches("Сделать бота на python", "бот принимает заявки", tagged=True)
